@@ -5,6 +5,8 @@ import java.util.UUID;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
@@ -18,10 +20,10 @@ import lombok.Setter;
 
 @Entity
 @Table(
-	name = "projects",
-	uniqueConstraints = {
-		@UniqueConstraint(name = "uk_projects_org_project_key", columnNames = {"organization_id", "project_key"})
-	}
+        name = "projects",
+        uniqueConstraints = {
+                @UniqueConstraint(name = "uk_projects_org_project_key", columnNames = {"organization_id", "project_key"})
+        }
 )
 @Getter
 @Setter
@@ -30,22 +32,22 @@ import lombok.Setter;
 @Builder
 public class Project {
 
-	@Id
-	@Column(length = 36)
-	private String id;
+        @Id
+        @Column(length = 36)
+        private String id;
 
-	@Column(name = "organization_id", nullable = false, length = 36)
-	private String organizationId;
+        @Column(name = "organization_id", nullable = false, length = 36)
+        private String organizationId;
 
-	@Column(name = "project_key", nullable = false, length = 50)
-	private String projectKey;
+        @Column(name = "project_key", nullable = false, length = 50)
+        private String projectKey;
 
-	@Column(nullable = false, length = 100)
-	private String name;
+        @Column(nullable = false, length = 100)
+        private String name;
 
-	@Column(nullable = false, length = 20)
-	private String status;
-
+        @Enumerated(EnumType.STRING)
+        @Column(nullable = false, length = 20)
+        private ProjectStatus status;
 	@Column(name = "default_model", length = 100)
 	private String defaultModel;
 
