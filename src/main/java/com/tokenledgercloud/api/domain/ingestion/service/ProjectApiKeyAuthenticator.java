@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.tokenledgercloud.api.domain.project.entity.Project;
+import com.tokenledgercloud.api.domain.project.entity.ProjectStatus;
 import com.tokenledgercloud.api.domain.project.repository.ProjectRepository;
 import com.tokenledgercloud.api.domain.projectapikey.entity.ProjectApiKey;
 import com.tokenledgercloud.api.domain.projectapikey.repository.ProjectApiKeyRepository;
@@ -90,7 +91,7 @@ public class ProjectApiKeyAuthenticator {
 		if (!project.getId().equals(apiKey.getProjectId())) {
 			throw new ApiException(ErrorCode.FORBIDDEN, "Project API key is not allowed for this project.");
 		}
-		if (!ACTIVE_STATUS.equalsIgnoreCase(project.getStatus())) {
+		if (project.getStatus() != ProjectStatus.ACTIVE) {
 			throw new ApiException(ErrorCode.FORBIDDEN, "Project is not active.");
 		}
 

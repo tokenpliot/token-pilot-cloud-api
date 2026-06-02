@@ -28,6 +28,7 @@ import com.tokenledgercloud.api.domain.project.dto.ProjectRankingItemResponse;
 import com.tokenledgercloud.api.domain.project.dto.ProjectRankingResponse;
 import com.tokenledgercloud.api.domain.project.entity.Project;
 import com.tokenledgercloud.api.domain.project.entity.ProjectEnvironment;
+import com.tokenledgercloud.api.domain.project.entity.ProjectStatus;
 import com.tokenledgercloud.api.domain.project.repository.ProjectEnvironmentRepository;
 import com.tokenledgercloud.api.domain.project.repository.ProjectRepository;
 import com.tokenledgercloud.api.domain.usage.repository.UsageLogRepository;
