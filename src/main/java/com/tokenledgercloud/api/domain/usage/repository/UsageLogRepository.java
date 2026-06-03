@@ -1,6 +1,7 @@
 package com.tokenledgercloud.api.domain.usage.repository;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -13,6 +14,7 @@ import com.tokenledgercloud.api.domain.usage.repository.projection.ModelCostSumm
 import com.tokenledgercloud.api.domain.usage.repository.projection.ProjectCostRankingProjection;
 import com.tokenledgercloud.api.domain.usage.repository.projection.CostTrendProjection;
 import com.tokenledgercloud.api.domain.usage.repository.projection.ProjectTopModelProjection;
+import com.tokenledgercloud.api.domain.usage.repository.projection.ProjectUsageRankingProjection;
 public interface UsageLogRepository extends JpaRepository<UsageLog, String> {
 
 	Optional<UsageLog> findByProjectIdAndEnvironmentAndRequestId(String projectId, String environment, String requestId);
@@ -143,5 +145,26 @@ public interface UsageLogRepository extends JpaRepository<UsageLog, String> {
 		String environment,
 		LocalDateTime from,
 		LocalDateTime to
+	);
+
+	@Query("""
+		select u.projectId as projectId,
+			coalesce(sum(u.totalCostUsd), 0) as totalCost,
+			coalesce(sum(u.totalTokens), 0) as totalTokens,
+			max(u.occurredAt) as latestUsedAt
+		from UsageLog u
+		where u.projectId in :projectIds
+		and (:environment is null or u.environment = :environment)
+		and u.occurredAt >= :from
+		and u.occurredAt < :to
+		group by u.projectId
+		order by sum(u.totalCostUsd) desc, max(u.occurredAt) desc
+	""")
+	List<ProjectUsageRankingProjection> findProjectUsageRanking(
+		Collection<String> projectIds,
+		String environment,
+		LocalDateTime from,
+		LocalDateTime to,
+		Pageable pageable
 	);
 }

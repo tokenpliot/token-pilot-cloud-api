@@ -3,6 +3,7 @@
 # Backend
 .gradle/
 build/
+bin/
 out/
 
 # Secrets / local env
