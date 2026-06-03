@@ -24,8 +24,11 @@ import com.tokenledgercloud.api.domain.project.dto.ProjectCreateResponse;
 import com.tokenledgercloud.api.domain.project.dto.ProjectDetailResponse;
 import com.tokenledgercloud.api.domain.project.dto.ProjectListItemResponse;
 import com.tokenledgercloud.api.domain.project.dto.ProjectListResponse;
+import com.tokenledgercloud.api.domain.project.dto.ProjectMutationResponse;
 import com.tokenledgercloud.api.domain.project.dto.ProjectRankingItemResponse;
 import com.tokenledgercloud.api.domain.project.dto.ProjectRankingResponse;
+import com.tokenledgercloud.api.domain.project.dto.ProjectStatusUpdateRequest;
+import com.tokenledgercloud.api.domain.project.dto.ProjectUpdateRequest;
 import com.tokenledgercloud.api.domain.project.entity.Project;
 import com.tokenledgercloud.api.domain.project.entity.ProjectEnvironment;
 import com.tokenledgercloud.api.domain.project.entity.ProjectStatus;
@@ -78,6 +81,48 @@ public class ProjectService {
 		projectEnvironmentRepository.saveAll(environments);
 
 		return toCreateResponse(project);
+	}
+
+	@Transactional
+	public ProjectMutationResponse updateProject(Authentication authentication, String projectId, ProjectUpdateRequest request) {
+		getMember(authentication);
+		Project project = getProject(projectId);
+
+		project.setName(request.name());
+		project.setDefaultModel(request.defaultModel());
+		replaceProjectEnvironments(project, request.environments());
+
+		return toMutationResponse(project, request.environments());
+	}
+
+	@Transactional
+	public ProjectMutationResponse updateProjectStatus(
+		Authentication authentication,
+		String projectId,
+		ProjectStatusUpdateRequest request
+	) {
+		getMember(authentication);
+		Project project = getProject(projectId);
+		project.setStatus(parseStatus(request.status()));
+		List<String> environments = projectEnvironmentRepository.findByProjectId(project.getId())
+			.stream()
+			.map(ProjectEnvironment::getEnvironment)
+			.toList();
+
+		return toMutationResponse(project, environments);
+	}
+
+	@Transactional
+	public ProjectMutationResponse deleteProject(Authentication authentication, String projectId) {
+		getMember(authentication);
+		Project project = getProject(projectId);
+		project.setStatus(ProjectStatus.DELETED);
+		List<String> environments = projectEnvironmentRepository.findByProjectId(project.getId())
+			.stream()
+			.map(ProjectEnvironment::getEnvironment)
+			.toList();
+
+		return toMutationResponse(project, environments);
 	}
 
 	@Transactional(readOnly = true)
@@ -218,6 +263,17 @@ public class ProjectService {
 	        return new ProjectCreateResponse(project.getId(), project.getName(), project.getProjectKey(), project.getStatus().name());
 	}
 
+	private ProjectMutationResponse toMutationResponse(Project project, List<String> environments) {
+		return new ProjectMutationResponse(
+			project.getId(),
+			project.getName(),
+			project.getProjectKey(),
+			project.getStatus().name(),
+			environments.stream().distinct().toList(),
+			project.getDefaultModel()
+		);
+	}
+
 	private ProjectListItemResponse toListItemResponse(Project project, List<String> environments) {
 	        return new ProjectListItemResponse(
 	                project.getId(),
@@ -237,7 +293,20 @@ public class ProjectService {
 				ProjectEnvironment::getProjectId,
 				LinkedHashMap::new,
 				Collectors.mapping(ProjectEnvironment::getEnvironment, Collectors.toList())
-			));
+				));
+	}
+
+	private void replaceProjectEnvironments(Project project, List<String> environments) {
+		projectEnvironmentRepository.deleteByProjectId(project.getId());
+		List<ProjectEnvironment> replacements = environments.stream()
+			.distinct()
+			.map(environment -> ProjectEnvironment.builder()
+				.organizationId(project.getOrganizationId())
+				.projectId(project.getId())
+				.environment(environment)
+				.build())
+			.toList();
+		projectEnvironmentRepository.saveAll(replacements);
 	}
 
 	private void validateLimit(Integer limit) {

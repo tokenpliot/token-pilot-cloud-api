@@ -3,15 +3,20 @@ package com.tokenledgercloud.api.domain.project.controller;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.tokenledgercloud.api.domain.project.dto.ProjectCreateRequest;
+import com.tokenledgercloud.api.domain.project.dto.ProjectStatusUpdateRequest;
+import com.tokenledgercloud.api.domain.project.dto.ProjectUpdateRequest;
 import com.tokenledgercloud.api.domain.project.service.ProjectService;
 import com.tokenledgercloud.api.global.response.ApiResponse;
 
@@ -67,6 +72,41 @@ public class ProjectController {
 		return ResponseEntity.ok(ApiResponse.success(
 			"프로젝트 상세 조회 성공",
 			projectService.getProject(authentication, projectId)
+		));
+	}
+
+	@PutMapping("/{projectId}")
+	public ResponseEntity<ApiResponse<?>> updateProject(
+		Authentication authentication,
+		@PathVariable String projectId,
+		@Valid @RequestBody ProjectUpdateRequest request
+	) {
+		return ResponseEntity.ok(ApiResponse.success(
+			"프로젝트 수정 성공",
+			projectService.updateProject(authentication, projectId, request)
+		));
+	}
+
+	@PatchMapping("/{projectId}/status")
+	public ResponseEntity<ApiResponse<?>> updateProjectStatus(
+		Authentication authentication,
+		@PathVariable String projectId,
+		@Valid @RequestBody ProjectStatusUpdateRequest request
+	) {
+		return ResponseEntity.ok(ApiResponse.success(
+			"프로젝트 상태 변경 성공",
+			projectService.updateProjectStatus(authentication, projectId, request)
+		));
+	}
+
+	@DeleteMapping("/{projectId}")
+	public ResponseEntity<ApiResponse<?>> deleteProject(
+		Authentication authentication,
+		@PathVariable String projectId
+	) {
+		return ResponseEntity.ok(ApiResponse.success(
+			"프로젝트 삭제 성공",
+			projectService.deleteProject(authentication, projectId)
 		));
 	}
 }

@@ -12,4 +12,6 @@ public interface ProjectEnvironmentRepository extends JpaRepository<ProjectEnvir
 	List<ProjectEnvironment> findByProjectId(String projectId);
 
 	List<ProjectEnvironment> findByProjectIdIn(Collection<String> projectIds);
+
+	void deleteByProjectId(String projectId);
 }
