@@ -60,6 +60,12 @@ curl -X POST http://52.78.69.13:8080/internal/usage-logs \
     "latencyMs": 2000
   }'
 ```
+
+## Control Plane 계약 (Phase 1 초안)
+
+- 판정·집행 책임 경계: [ADR 0001](docs/adr/0001-decision-enforcement-boundary.md)
+- 판정·승인·사용량·정산 API 계약: [`docs/api/control-plane-v1.yaml`](docs/api/control-plane-v1.yaml) (OpenAPI 3.1)
+- 계약 테스트: `./gradlew test --tests 'com.tokenledgercloud.api.domain.decision.*'`
 ___
 
 ## Local 실행
