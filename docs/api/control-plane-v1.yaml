@@ -1,0 +1,908 @@
+openapi: 3.1.0
+info:
+  title: Token Pilot Control Plane API
+  version: "2026-10-01"
+  summary: 판정·사용량·정산 계약 초안 (ADR 0001)
+  description: |
+    Java Client SDK가 호출하는 중앙 Control Plane 계약 초안이다.
+    책임 경계, 집행 모드, 오류 매핑 규칙은 `docs/adr/0001-decision-enforcement-boundary.md`를 따른다.
+
+    - 정책 판정(`ALLOW`, `DENY_POLICY`, `DENY_BUDGET`, `REQUIRE_APPROVAL`, `INDETERMINATE`)은 항상 `200`으로 전달한다.
+    - `CONTROL_PLANE_UNAVAILABLE`은 `503`으로만 전달하며, 어떤 오류 응답도 `DENY_*` 판정을 담지 않는다.
+    - 원문 prompt/completion은 받지 않는다. 요청 스키마는 정의되지 않은 필드를 거부한다.
+servers:
+  - url: https://api.token-pilot.cloud
+security:
+  - projectKey: []
+tags:
+  - name: decisions
+  - name: approvals
+  - name: usage
+  - name: settlements
+paths:
+  /api/control/v1/decisions:
+    post:
+      tags: [decisions]
+      operationId: createDecision
+      summary: LLM 호출 전 판정을 요청한다.
+      description: |
+        판정은 provider 호출을 바꾸지 않는다. 집행 여부는 클라이언트의 `EnforcementSettings`가 결정한다.
+        `reservationId`는 클라이언트가 보고한 모드가 `ENFORCE`이고 판정이 `ALLOW`일 때만 발급된다.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecisionRequest'
+            examples:
+              observe:
+                value:
+                  schemaVersion: "2026-10-01"
+                  requestId: req-01J9Z6Q2W8
+                  environment: prod
+                  provider: openai
+                  model: gpt-4o-mini
+                  clientMode: OBSERVE
+                  estimatedInputTokens: 1200
+                  maxOutputTokens: 800
+                  estimatedCostUsd: "0.000660"
+                  pricingVersion: openai-2026-08-14
+                  metadata:
+                    feature: support-summary
+              enforce:
+                value:
+                  schemaVersion: "2026-10-01"
+                  requestId: req-01J9Z6Q2W9
+                  environment: prod
+                  provider: openai
+                  model: gpt-4o
+                  clientMode: ENFORCE
+                  estimatedInputTokens: 3000
+                  maxOutputTokens: 1000
+                  estimatedCostUsd: "0.017500"
+                  pricingVersion: openai-2026-08-14
+      responses:
+        '200':
+          description: 판정 완료. 정책 거부도 정상 판정이므로 `200`이다.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DecisionEnvelope'
+              examples:
+                allowObserve:
+                  value:
+                    success: true
+                    code: SUCCESS
+                    message: Decision evaluated.
+                    data:
+                      schemaVersion: "2026-10-01"
+                      decisionId: dec-7f3a1c
+                      requestId: req-01J9Z6Q2W8
+                      outcome: ALLOW
+                      effectiveMode: OBSERVE
+                      reasons: []
+                      policyVersion: pol-v3
+                      evaluatedAt: "2026-10-02T12:00:00Z"
+                    errors: []
+                    timestamp: "2026-10-02T21:00:00"
+                allowEnforceWithReservation:
+                  value:
+                    success: true
+                    code: SUCCESS
+                    message: Decision evaluated.
+                    data:
+                      schemaVersion: "2026-10-01"
+                      decisionId: dec-7f3a1d
+                      requestId: req-01J9Z6Q2W9
+                      outcome: ALLOW
+                      effectiveMode: ENFORCE
+                      reasons: []
+                      policyVersion: pol-v3
+                      evaluatedAt: "2026-10-02T12:00:01Z"
+                      reservation:
+                        reservationId: rsv-90ab12
+                        state: RESERVED
+                        reservedCostUsd: "0.017500"
+                        expiresAt: "2026-10-02T12:05:01Z"
+                    errors: []
+                    timestamp: "2026-10-02T21:00:01"
+                denyBudget:
+                  value:
+                    success: true
+                    code: SUCCESS
+                    message: Decision evaluated.
+                    data:
+                      schemaVersion: "2026-10-01"
+                      decisionId: dec-7f3a1e
+                      requestId: req-01J9Z6Q2WA
+                      outcome: DENY_BUDGET
+                      effectiveMode: ENFORCE
+                      reasons:
+                        - code: MONTHLY_BUDGET_EXCEEDED
+                          message: Projected cost exceeds the remaining monthly budget.
+                      policyVersion: pol-v3
+                      evaluatedAt: "2026-10-02T12:00:02Z"
+                    errors: []
+                    timestamp: "2026-10-02T21:00:02"
+                requireApproval:
+                  value:
+                    success: true
+                    code: SUCCESS
+                    message: Decision evaluated.
+                    data:
+                      schemaVersion: "2026-10-01"
+                      decisionId: dec-7f3a1f
+                      requestId: req-01J9Z6Q2WB
+                      outcome: REQUIRE_APPROVAL
+                      effectiveMode: ENFORCE
+                      reasons:
+                        - code: MODEL_REQUIRES_APPROVAL
+                          message: gpt-4o requires approval in prod.
+                      policyVersion: pol-v3
+                      evaluatedAt: "2026-10-02T12:00:03Z"
+                      approvalId: apr-55c2
+                    errors: []
+                    timestamp: "2026-10-02T21:00:03"
+                indeterminateMissingPrice:
+                  value:
+                    success: true
+                    code: SUCCESS
+                    message: Decision evaluated.
+                    data:
+                      schemaVersion: "2026-10-01"
+                      decisionId: dec-7f3a20
+                      requestId: req-01J9Z6Q2WC
+                      outcome: INDETERMINATE
+                      effectiveMode: ADVISORY
+                      reasons:
+                        - code: PRICING_NOT_FOUND
+                          message: No pricing plan for model gpt-5-preview.
+                      policyVersion: pol-v3
+                      evaluatedAt: "2026-10-02T12:00:04Z"
+                    errors: []
+                    timestamp: "2026-10-02T21:00:04"
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/ControlPlaneUnavailable'
+
+  /api/control/v1/approvals/{approvalId}:
+    get:
+      tags: [approvals]
+      operationId: getApproval
+      summary: 승인 대기 판정의 현재 상태를 조회한다.
+      parameters:
+        - name: approvalId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Identifier'
+      responses:
+        '200':
+          description: 승인 상태
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalEnvelope'
+              examples:
+                approved:
+                  value:
+                    success: true
+                    code: SUCCESS
+                    message: Approval found.
+                    data:
+                      schemaVersion: "2026-10-01"
+                      approvalId: apr-55c2
+                      decisionId: dec-7f3a1f
+                      requestId: req-01J9Z6Q2WB
+                      state: APPROVED
+                      decidedBy: approver-7
+                      decidedAt: "2026-10-02T12:03:00Z"
+                      expiresAt: "2026-10-02T13:00:03Z"
+                    errors: []
+                    timestamp: "2026-10-02T21:03:00"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ControlPlaneUnavailable'
+
+  /api/control/v1/usage-events:
+    post:
+      tags: [usage]
+      operationId: recordUsageEvent
+      summary: 호출 후 실제 사용량을 Observe 원장에 기록한다.
+      description: 같은 `Idempotency-Key`와 같은 본문은 처음 기록된 이벤트를 그대로 반환한다.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UsageEvent'
+            examples:
+              succeeded:
+                value:
+                  schemaVersion: "2026-10-01"
+                  requestId: req-01J9Z6Q2W8
+                  decisionId: dec-7f3a1c
+                  environment: prod
+                  provider: openai
+                  model: gpt-4o-mini
+                  callStatus: SUCCEEDED
+                  usage:
+                    promptTokens: 1180
+                    completionTokens: 640
+                    cachedPromptTokens: 0
+                    reasoningTokens: 0
+                  cost:
+                    promptCostUsd: "0.000177"
+                    completionCostUsd: "0.000384"
+                    totalCostUsd: "0.000561"
+                  pricingVersion: openai-2026-08-14
+                  occurredAt: "2026-10-02T12:00:02Z"
+              usageUnknown:
+                value:
+                  schemaVersion: "2026-10-01"
+                  requestId: req-01J9Z6Q2WD
+                  environment: prod
+                  provider: openai
+                  model: gpt-4o-mini
+                  callStatus: USAGE_UNKNOWN
+                  pricingVersion: openai-2026-08-14
+                  occurredAt: "2026-10-02T12:00:09Z"
+      responses:
+        '202':
+          description: 원장에 기록됨
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UsageEventEnvelope'
+              examples:
+                recorded:
+                  value:
+                    success: true
+                    code: SUCCESS
+                    message: Usage event recorded.
+                    data:
+                      schemaVersion: "2026-10-01"
+                      usageEventId: use-1a2b3c
+                      requestId: req-01J9Z6Q2W8
+                      duplicate: false
+                      settlementState: SETTLED
+                    errors: []
+                    timestamp: "2026-10-02T21:00:05"
+                unsettled:
+                  value:
+                    success: true
+                    code: SUCCESS
+                    message: Usage event recorded.
+                    data:
+                      schemaVersion: "2026-10-01"
+                      usageEventId: use-1a2b3d
+                      requestId: req-01J9Z6Q2WD
+                      duplicate: false
+                      settlementState: UNSETTLED
+                    errors: []
+                    timestamp: "2026-10-02T21:00:09"
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '503':
+          $ref: '#/components/responses/ControlPlaneUnavailable'
+
+  /api/control/v1/reservations/{reservationId}/settlements:
+    post:
+      tags: [settlements]
+      operationId: settleReservation
+      summary: ENFORCE 예약을 실제 사용량으로 정산하거나 해제한다.
+      description: |
+        종료 상태(`COMMITTED`, `RELEASED`, `WRITTEN_OFF`)의 예약에 같은 정산을 다시 보내면 원래 결과를 반환한다.
+        종료 상태와 다른 결과를 요구하면 `409`를 반환한다.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: reservationId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Identifier'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SettlementRequest'
+            examples:
+              commit:
+                value:
+                  schemaVersion: "2026-10-01"
+                  requestId: req-01J9Z6Q2W9
+                  result: COMMIT
+                  usage:
+                    promptTokens: 2950
+                    completionTokens: 720
+                  cost:
+                    promptCostUsd: "0.007375"
+                    completionCostUsd: "0.007200"
+                    totalCostUsd: "0.014575"
+                  occurredAt: "2026-10-02T12:00:06Z"
+              release:
+                value:
+                  schemaVersion: "2026-10-01"
+                  requestId: req-01J9Z6Q2W9
+                  result: RELEASE
+                  occurredAt: "2026-10-02T12:00:06Z"
+      responses:
+        '200':
+          description: 정산 결과
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettlementEnvelope'
+              examples:
+                committed:
+                  value:
+                    success: true
+                    code: SUCCESS
+                    message: Reservation settled.
+                    data:
+                      schemaVersion: "2026-10-01"
+                      reservationId: rsv-90ab12
+                      requestId: req-01J9Z6Q2W9
+                      previousState: IN_FLIGHT
+                      state: COMMITTED
+                      committedCostUsd: "0.014575"
+                      releasedCostUsd: "0.002925"
+                      duplicate: false
+                    errors: []
+                    timestamp: "2026-10-02T21:00:06"
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '503':
+          $ref: '#/components/responses/ControlPlaneUnavailable'
+
+components:
+  securitySchemes:
+    projectKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: 프로젝트·환경 단위 API Key. 폐기된 키는 `401`이며 정책 거부가 아니다.
+
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: 같은 키와 같은 본문은 같은 결과를, 같은 키와 다른 본문은 `409`를 반환한다.
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 128
+
+  responses:
+    InvalidRequest:
+      description: 요청 계약 위반. 클라이언트는 `INDETERMINATE`로 취급한다.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          examples:
+            rawPromptRejected:
+              value:
+                success: false
+                code: INVALID_REQUEST
+                message: Unknown field 'prompt'. Raw prompt text is not accepted.
+                data:
+                  outcome: INDETERMINATE
+                errors:
+                  - field: prompt
+                    message: not allowed
+                timestamp: "2026-10-02T21:00:10"
+    Unauthorized:
+      description: API Key 누락·폐기. 클라이언트는 `INDETERMINATE`로 취급한다.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          examples:
+            revokedKey:
+              value:
+                success: false
+                code: UNAUTHORIZED
+                message: Project API key is revoked.
+                data:
+                  outcome: INDETERMINATE
+                errors: []
+                timestamp: "2026-10-02T21:00:11"
+    NotFound:
+      description: 대상 없음. 클라이언트는 `INDETERMINATE`로 취급한다.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          examples:
+            missing:
+              value:
+                success: false
+                code: NOT_FOUND
+                message: Reservation not found.
+                data:
+                  outcome: INDETERMINATE
+                errors: []
+                timestamp: "2026-10-02T21:00:12"
+    IdempotencyConflict:
+      description: 같은 `Idempotency-Key`에 다른 본문. 클라이언트는 `INDETERMINATE`로 취급한다.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          examples:
+            conflict:
+              value:
+                success: false
+                code: IDEMPOTENCY_CONFLICT
+                message: Idempotency-Key was already used with a different request body.
+                data:
+                  outcome: INDETERMINATE
+                errors: []
+                timestamp: "2026-10-02T21:00:13"
+    RateLimited:
+      description: 과부하. 클라이언트는 `CONTROL_PLANE_UNAVAILABLE`로 취급한다.
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+            minimum: 0
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          examples:
+            throttled:
+              value:
+                success: false
+                code: RATE_LIMITED
+                message: Too many decision requests.
+                data:
+                  outcome: CONTROL_PLANE_UNAVAILABLE
+                  retryAfterSeconds: 2
+                errors: []
+                timestamp: "2026-10-02T21:00:14"
+    ControlPlaneUnavailable:
+      description: Control Plane 장애. 정책 거부가 아니며 고객의 `onUnavailable` 설정으로만 집행된다.
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+            minimum: 0
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          examples:
+            ledgerDown:
+              value:
+                success: false
+                code: CONTROL_PLANE_UNAVAILABLE
+                message: Ledger store is unavailable.
+                data:
+                  outcome: CONTROL_PLANE_UNAVAILABLE
+                  retryAfterSeconds: 5
+                errors: []
+                timestamp: "2026-10-02T21:00:15"
+
+  schemas:
+    SchemaVersion:
+      type: string
+      const: "2026-10-01"
+
+    Identifier:
+      type: string
+      minLength: 1
+      maxLength: 128
+      pattern: '^[A-Za-z0-9._:-]+$'
+
+    UsdAmount:
+      description: 소수점 6자리까지의 USD 금액 문자열. 부동소수점 오차를 피하기 위해 문자열로 전달한다.
+      type: string
+      pattern: '^(0|[1-9][0-9]*)(\.[0-9]{1,6})?$'
+
+    EnforcementMode:
+      type: string
+      enum: [OBSERVE, ADVISORY, ENFORCE]
+      default: OBSERVE
+
+    DecisionOutcome:
+      type: string
+      enum: [ALLOW, DENY_POLICY, DENY_BUDGET, REQUIRE_APPROVAL, INDETERMINATE, CONTROL_PLANE_UNAVAILABLE]
+
+    EvaluatedOutcome:
+      description: 판정 완료(`200`)로 전달될 수 있는 결과. `CONTROL_PLANE_UNAVAILABLE`은 포함하지 않는다.
+      type: string
+      enum: [ALLOW, DENY_POLICY, DENY_BUDGET, REQUIRE_APPROVAL, INDETERMINATE]
+
+    ErrorOutcome:
+      description: 오류 응답이 담을 수 있는 결과. 정책 거부(`DENY_*`)는 오류 응답에 실리지 않는다.
+      type: string
+      enum: [INDETERMINATE, CONTROL_PLANE_UNAVAILABLE]
+
+    ReservationState:
+      description: |
+        `RESERVED → IN_FLIGHT → COMMITTED | RECONCILIATION_REQUIRED | RELEASED`,
+        `RECONCILIATION_REQUIRED → COMMITTED | WRITTEN_OFF`, `RESERVED → RELEASED`.
+        `COMMITTED`, `RELEASED`, `WRITTEN_OFF`는 종료 상태다.
+      type: string
+      enum: [RESERVED, IN_FLIGHT, RECONCILIATION_REQUIRED, COMMITTED, RELEASED, WRITTEN_OFF]
+
+    ApprovalState:
+      description: '`PENDING → APPROVED | REJECTED | EXPIRED`'
+      type: string
+      enum: [PENDING, APPROVED, REJECTED, EXPIRED]
+
+    Metadata:
+      description: 가명화된 문자열 키·값만 허용한다. 원문 prompt나 개인정보를 넣지 않는다.
+      type: object
+      maxProperties: 16
+      propertyNames:
+        pattern: '^[a-z][a-z0-9_.-]{0,63}$'
+      additionalProperties:
+        type: string
+        maxLength: 256
+
+    DecisionRequest:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, requestId, environment, provider, model, clientMode, estimatedInputTokens, maxOutputTokens]
+      properties:
+        schemaVersion:
+          $ref: '#/components/schemas/SchemaVersion'
+        requestId:
+          $ref: '#/components/schemas/Identifier'
+        environment:
+          $ref: '#/components/schemas/Identifier'
+        provider:
+          $ref: '#/components/schemas/Identifier'
+        model:
+          $ref: '#/components/schemas/Identifier'
+        clientMode:
+          description: 클라이언트에 설정된 집행 모드. 서버는 감사용으로만 쓰며 모드를 바꾸지 않는다.
+          $ref: '#/components/schemas/EnforcementMode'
+        estimatedInputTokens:
+          type: integer
+          minimum: 0
+        maxOutputTokens:
+          type: integer
+          minimum: 0
+        estimatedCostUsd:
+          $ref: '#/components/schemas/UsdAmount'
+        pricingVersion:
+          $ref: '#/components/schemas/Identifier'
+        metadata:
+          $ref: '#/components/schemas/Metadata'
+
+    DecisionReason:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          pattern: '^[A-Z][A-Z0-9_]*$'
+        message:
+          type: string
+          maxLength: 512
+
+    Reservation:
+      type: object
+      additionalProperties: false
+      required: [reservationId, state, reservedCostUsd, expiresAt]
+      properties:
+        reservationId:
+          $ref: '#/components/schemas/Identifier'
+        state:
+          $ref: '#/components/schemas/ReservationState'
+        reservedCostUsd:
+          $ref: '#/components/schemas/UsdAmount'
+        expiresAt:
+          type: string
+          format: date-time
+
+    DecisionResponse:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, decisionId, requestId, outcome, effectiveMode, reasons, policyVersion, evaluatedAt]
+      properties:
+        schemaVersion:
+          $ref: '#/components/schemas/SchemaVersion'
+        decisionId:
+          $ref: '#/components/schemas/Identifier'
+        requestId:
+          $ref: '#/components/schemas/Identifier'
+        outcome:
+          $ref: '#/components/schemas/EvaluatedOutcome'
+        effectiveMode:
+          $ref: '#/components/schemas/EnforcementMode'
+        reasons:
+          type: array
+          items:
+            $ref: '#/components/schemas/DecisionReason'
+        policyVersion:
+          $ref: '#/components/schemas/Identifier'
+        evaluatedAt:
+          type: string
+          format: date-time
+        reservation:
+          $ref: '#/components/schemas/Reservation'
+        approvalId:
+          $ref: '#/components/schemas/Identifier'
+
+    ApprovalResponse:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, approvalId, decisionId, requestId, state, expiresAt]
+      properties:
+        schemaVersion:
+          $ref: '#/components/schemas/SchemaVersion'
+        approvalId:
+          $ref: '#/components/schemas/Identifier'
+        decisionId:
+          $ref: '#/components/schemas/Identifier'
+        requestId:
+          $ref: '#/components/schemas/Identifier'
+        state:
+          $ref: '#/components/schemas/ApprovalState'
+        decidedBy:
+          $ref: '#/components/schemas/Identifier'
+        decidedAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+
+    UsageTokens:
+      type: object
+      additionalProperties: false
+      required: [promptTokens, completionTokens]
+      properties:
+        promptTokens:
+          type: integer
+          minimum: 0
+        completionTokens:
+          type: integer
+          minimum: 0
+        cachedPromptTokens:
+          type: integer
+          minimum: 0
+        reasoningTokens:
+          type: integer
+          minimum: 0
+
+    UsageCost:
+      type: object
+      additionalProperties: false
+      required: [promptCostUsd, completionCostUsd, totalCostUsd]
+      properties:
+        promptCostUsd:
+          $ref: '#/components/schemas/UsdAmount'
+        completionCostUsd:
+          $ref: '#/components/schemas/UsdAmount'
+        cachedPromptCostUsd:
+          $ref: '#/components/schemas/UsdAmount'
+        reasoningCostUsd:
+          $ref: '#/components/schemas/UsdAmount'
+        totalCostUsd:
+          $ref: '#/components/schemas/UsdAmount'
+
+    UsageEvent:
+      description: |
+        `callStatus`가 `SUCCEEDED`면 `usage`와 `cost`가 필수다.
+        `USAGE_UNKNOWN`은 provider 응답의 사용량을 알 수 없는 경우이며 원장에 미정산(`UNSETTLED`)으로 남는다.
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, requestId, environment, provider, model, callStatus, pricingVersion, occurredAt]
+      properties:
+        schemaVersion:
+          $ref: '#/components/schemas/SchemaVersion'
+        requestId:
+          $ref: '#/components/schemas/Identifier'
+        decisionId:
+          $ref: '#/components/schemas/Identifier'
+        reservationId:
+          $ref: '#/components/schemas/Identifier'
+        environment:
+          $ref: '#/components/schemas/Identifier'
+        provider:
+          $ref: '#/components/schemas/Identifier'
+        model:
+          $ref: '#/components/schemas/Identifier'
+        callStatus:
+          type: string
+          enum: [SUCCEEDED, PROVIDER_FAILED, USAGE_UNKNOWN, BLOCKED_BY_CLIENT]
+        usage:
+          $ref: '#/components/schemas/UsageTokens'
+        cost:
+          $ref: '#/components/schemas/UsageCost'
+        pricingVersion:
+          $ref: '#/components/schemas/Identifier'
+        metadata:
+          $ref: '#/components/schemas/Metadata'
+        occurredAt:
+          type: string
+          format: date-time
+      if:
+        properties:
+          callStatus:
+            const: SUCCEEDED
+      then:
+        required: [usage, cost]
+
+    UsageEventReceipt:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, usageEventId, requestId, duplicate, settlementState]
+      properties:
+        schemaVersion:
+          $ref: '#/components/schemas/SchemaVersion'
+        usageEventId:
+          $ref: '#/components/schemas/Identifier'
+        requestId:
+          $ref: '#/components/schemas/Identifier'
+        duplicate:
+          type: boolean
+        settlementState:
+          type: string
+          enum: [SETTLED, UNSETTLED]
+
+    SettlementRequest:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, requestId, result, occurredAt]
+      properties:
+        schemaVersion:
+          $ref: '#/components/schemas/SchemaVersion'
+        requestId:
+          $ref: '#/components/schemas/Identifier'
+        result:
+          description: '`COMMIT`은 실제 사용량 정산, `RELEASE`는 호출하지 않았거나 실패한 예약 해제, `RECONCILIATION_REQUIRED`는 사용량을 알 수 없는 경우다.'
+          type: string
+          enum: [COMMIT, RELEASE, RECONCILIATION_REQUIRED]
+        usage:
+          $ref: '#/components/schemas/UsageTokens'
+        cost:
+          $ref: '#/components/schemas/UsageCost'
+        occurredAt:
+          type: string
+          format: date-time
+      if:
+        properties:
+          result:
+            const: COMMIT
+      then:
+        required: [usage, cost]
+
+    SettlementResult:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, reservationId, requestId, previousState, state, duplicate]
+      properties:
+        schemaVersion:
+          $ref: '#/components/schemas/SchemaVersion'
+        reservationId:
+          $ref: '#/components/schemas/Identifier'
+        requestId:
+          $ref: '#/components/schemas/Identifier'
+        previousState:
+          $ref: '#/components/schemas/ReservationState'
+        state:
+          $ref: '#/components/schemas/ReservationState'
+        committedCostUsd:
+          $ref: '#/components/schemas/UsdAmount'
+        releasedCostUsd:
+          $ref: '#/components/schemas/UsdAmount'
+        duplicate:
+          type: boolean
+
+    ControlPlaneError:
+      type: object
+      additionalProperties: false
+      required: [outcome]
+      properties:
+        outcome:
+          $ref: '#/components/schemas/ErrorOutcome'
+        retryAfterSeconds:
+          type: integer
+          minimum: 0
+
+    ApiFieldError:
+      type: object
+      required: [field, message]
+      properties:
+        field:
+          type: string
+        message:
+          type: string
+
+    ApiEnvelope:
+      description: 기존 API와 같은 `ApiResponse` 응답 래퍼.
+      type: object
+      required: [success, code, message, data, errors, timestamp]
+      properties:
+        success:
+          type: boolean
+        code:
+          type: string
+        message:
+          type: string
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/ApiFieldError'
+        timestamp:
+          description: 서버 로컬 시각(`LocalDateTime`)
+          type: string
+
+    DecisionEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - properties:
+            success:
+              const: true
+            data:
+              $ref: '#/components/schemas/DecisionResponse'
+
+    ApprovalEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - properties:
+            success:
+              const: true
+            data:
+              $ref: '#/components/schemas/ApprovalResponse'
+
+    UsageEventEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - properties:
+            success:
+              const: true
+            data:
+              $ref: '#/components/schemas/UsageEventReceipt'
+
+    SettlementEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - properties:
+            success:
+              const: true
+            data:
+              $ref: '#/components/schemas/SettlementResult'
+
+    ErrorEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - properties:
+            success:
+              const: false
+            data:
+              $ref: '#/components/schemas/ControlPlaneError'

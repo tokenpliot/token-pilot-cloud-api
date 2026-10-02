@@ -60,6 +60,8 @@ dependencies {
 	testAnnotationProcessor 'org.projectlombok:lombok'
 
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
+	// Control Plane OpenAPI contract test (docs/api/control-plane-v1.yaml)
+	testImplementation 'com.networknt:json-schema-validator:1.5.6'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
