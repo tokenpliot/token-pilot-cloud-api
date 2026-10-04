@@ -65,6 +65,7 @@ curl -X POST http://52.78.69.13:8080/internal/usage-logs \
 
 - 판정·집행 책임 경계: [ADR 0001](docs/adr/0001-decision-enforcement-boundary.md)
 - 판정·승인·사용량·정산 API 계약: [`docs/api/control-plane-v1.yaml`](docs/api/control-plane-v1.yaml) (OpenAPI 3.1)
+- MySQL·인증·회계 정합성 및 마이그레이션 설계: [이슈 #9](docs/design/issue-9-data-integrity.md)
 - 계약 테스트: `./gradlew test --tests 'com.tokenledgercloud.api.domain.decision.*'`
 ___
 
