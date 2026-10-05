@@ -32,4 +32,10 @@ public enum ErrorCode {
 	private final HttpStatus status;
 	private final String code;
 	private final String message;
+
+	/** Whether the same request may succeed if sent again (ADR 0001 section 4: 408, 429 and 5xx). */
+	public boolean isRetryable() {
+		int value = status.value();
+		return value == 408 || value == 429 || status.is5xxServerError();
+	}
 }

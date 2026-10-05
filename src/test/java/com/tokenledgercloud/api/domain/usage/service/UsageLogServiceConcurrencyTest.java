@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
@@ -26,7 +27,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.DeadlockLoserDataAccessException;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -333,5 +337,37 @@ class UsageLogServiceConcurrencyTest {
 	void stubbingDoesNotLeakBetweenTests() {
 		assertThat(usageLogService.createIdempotent(request("req-leak", null, 1L)).duplicate()).isFalse();
 		assertThat(usageLogService.createIdempotent(request("req-leak", null, 1L)).duplicate()).isTrue();
+	}
+
+	@Test
+	void deadlockOnInsertIsMappedToRetryableError() {
+		doThrow(new DeadlockLoserDataAccessException("deadlock", null))
+			.when(usageLogRepository).saveAndFlush(any());
+
+		assertThatThrownBy(() -> usageLogService.createIdempotent(request("req-1", null, 1200L)))
+			.isInstanceOfSatisfying(ApiException.class, e -> {
+				assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INGESTION_RETRY_LATER);
+				assertThat(e.getErrorCode().isRetryable()).isTrue();
+			});
+	}
+
+	@Test
+	void lockTimeoutOnInsertIsMappedToRetryableError() {
+		doThrow(new CannotAcquireLockException("lock wait timeout"))
+			.when(usageLogRepository).saveAndFlush(any());
+
+		assertThatThrownBy(() -> usageLogService.create(request("req-1", null, 1200L)))
+			.isInstanceOfSatisfying(ApiException.class,
+				e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INGESTION_RETRY_LATER));
+	}
+
+	@Test
+	void lockFailureOnPreCheckIsMappedToRetryableError() {
+		doThrow(new PessimisticLockingFailureException("lock"))
+			.when(usageLogRepository).findByProjectIdAndEnvironmentAndRequestId(any(), any(), any());
+
+		assertThatThrownBy(() -> usageLogService.createIdempotent(request("req-1", null, 1200L)))
+			.isInstanceOfSatisfying(ApiException.class,
+				e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INGESTION_RETRY_LATER));
 	}
 }

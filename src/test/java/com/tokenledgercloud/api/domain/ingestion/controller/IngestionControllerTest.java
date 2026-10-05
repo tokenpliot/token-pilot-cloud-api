@@ -21,9 +21,11 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import com.tokenledgercloud.api.domain.ingestion.dto.IngestionBatchItemResponse;
 import com.tokenledgercloud.api.domain.ingestion.dto.IngestionBatchResponse;
 import com.tokenledgercloud.api.domain.ingestion.dto.IngestionEventRequest;
 import com.tokenledgercloud.api.domain.ingestion.dto.IngestionEventResponse;
+import com.tokenledgercloud.api.domain.ingestion.dto.IngestionItemStatus;
 import com.tokenledgercloud.api.domain.ingestion.dto.RejectedIngestionItemResponse;
 import com.tokenledgercloud.api.domain.ingestion.service.IngestionService;
 import com.tokenledgercloud.api.global.exception.ApiException;
@@ -223,6 +225,42 @@ class IngestionControllerTest {
 			.andExpect(status().isServiceUnavailable())
 			.andExpect(jsonPath("$.success").value(false))
 			.andExpect(jsonPath("$.code").value("INGESTION-503"));
+	}
+
+	@Test
+	void collectBatchKeepsLegacyFieldsAndAddsItemResults() throws Exception {
+		given(ingestionService.collectBatch(eq("test-api-key"), any()))
+			.willReturn(new IngestionBatchResponse(
+				1, 1,
+				List.of(new RejectedIngestionItemResponse(1, "req_b", "INGESTION-503", "retry", true)),
+				0, 1,
+				List.of(
+					new IngestionBatchItemResponse(0, "req_a", IngestionItemStatus.DUPLICATE, "usage-1", null, null, false),
+					new IngestionBatchItemResponse(1, "req_b", IngestionItemStatus.REJECTED, null, "INGESTION-503", "retry", true))
+			));
+
+		mockMvc().perform(post("/api/ingestion/events/batch")
+				.header("X-API-Key", "test-api-key")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{"projectKey":"support-copilot","environment":"prod","items":[
+					  {"requestId":"req_a","provider":"openai","model":"m","promptTokens":1,"completionTokens":1,
+					   "pricingVersion":"v","occurredAt":"2026-05-06T10:00:00Z"}]}
+					"""))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.data.acceptedCount").value(1))
+			.andExpect(jsonPath("$.data.rejectedCount").value(1))
+			.andExpect(jsonPath("$.data.rejectedItems[0].index").value(1))
+			.andExpect(jsonPath("$.data.rejectedItems[0].requestId").value("req_b"))
+			.andExpect(jsonPath("$.data.rejectedItems[0].code").value("INGESTION-503"))
+			.andExpect(jsonPath("$.data.rejectedItems[0].message").value("retry"))
+			.andExpect(jsonPath("$.data.rejectedItems[0].retryable").value(true))
+			.andExpect(jsonPath("$.data.createdCount").value(0))
+			.andExpect(jsonPath("$.data.duplicateCount").value(1))
+			.andExpect(jsonPath("$.data.items[0].status").value("DUPLICATE"))
+			.andExpect(jsonPath("$.data.items[0].usageEventId").value("usage-1"))
+			.andExpect(jsonPath("$.data.items[1].status").value("REJECTED"))
+			.andExpect(jsonPath("$.data.items[1].retryable").value(true));
 	}
 
 	private static final String EVENT_JSON = """

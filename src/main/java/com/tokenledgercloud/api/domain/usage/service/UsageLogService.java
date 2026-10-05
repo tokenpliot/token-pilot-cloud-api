@@ -9,6 +9,7 @@ import java.util.function.BiFunction;
 import java.util.function.Function;
 
 import org.hibernate.exception.ConstraintViolationException;
+import org.springframework.dao.ConcurrencyFailureException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -62,6 +63,16 @@ public class UsageLogService {
 	}
 
 	private UsageLogCreateResult createOrGet(UsageLogCreateRequest request, boolean enforcePayload) {
+		try {
+			return doCreateOrGet(request, enforcePayload);
+		} catch (ConcurrencyFailureException exception) {
+			// Deadlock, lock wait timeout, serialization failure: nothing was stored and re-sending is safe.
+			log.warn("Concurrency failure while storing usage log ({})", exception.getClass().getSimpleName());
+			throw new ApiException(ErrorCode.INGESTION_RETRY_LATER);
+		}
+	}
+
+	private UsageLogCreateResult doCreateOrGet(UsageLogCreateRequest request, boolean enforcePayload) {
 		String fingerprint = fingerprint(request);
 		String eventId = blankToNull(request.eventId());
 		boolean hasRequestId = request.requestId() != null && !request.requestId().isBlank();

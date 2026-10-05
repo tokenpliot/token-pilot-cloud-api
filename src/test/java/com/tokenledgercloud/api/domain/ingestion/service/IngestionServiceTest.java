@@ -20,11 +20,14 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import com.tokenledgercloud.api.domain.ingestion.dto.IngestionBatchItemResponse;
 import com.tokenledgercloud.api.domain.ingestion.dto.IngestionBatchRequest;
 import com.tokenledgercloud.api.domain.ingestion.dto.IngestionBatchResponse;
 import com.tokenledgercloud.api.domain.ingestion.dto.IngestionEventItemRequest;
 import com.tokenledgercloud.api.domain.ingestion.dto.IngestionEventRequest;
 import com.tokenledgercloud.api.domain.ingestion.dto.IngestionEventResponse;
+import com.tokenledgercloud.api.domain.ingestion.dto.IngestionItemStatus;
+import com.tokenledgercloud.api.domain.ingestion.dto.RejectedIngestionItemResponse;
 import com.tokenledgercloud.api.domain.usage.dto.UsageLogCreateRequest;
 import com.tokenledgercloud.api.domain.usage.dto.UsageLogCreateResult;
 import com.tokenledgercloud.api.domain.usage.dto.UsageLogResponse;
@@ -144,5 +147,52 @@ class IngestionServiceTest {
 			assertThat(rejected.code()).isEqualTo("INGESTION-409");
 		});
 		verify(usageLogService, times(3)).createIdempotent(any());
+	}
+
+	@Test
+	void batchListsEveryItemInRequestOrderWithStatusAndRetryable() {
+		given(usageLogService.createIdempotent(any()))
+			.willReturn(result("usage-1", false))
+			.willReturn(result("usage-2", true))
+			.willThrow(new ApiException(ErrorCode.INGESTION_RETRY_LATER))
+			.willThrow(new ApiException(ErrorCode.IDEMPOTENCY_CONFLICT));
+
+		IngestionBatchResponse response = ingestionService.collectBatch("key", new IngestionBatchRequest(
+			"support-copilot", "prod",
+			List.of(item("req-1", null), item("req-2", null), item("req-3", null), item("req-4", "evt-4"))
+		));
+
+		assertThat(response.items()).extracting(IngestionBatchItemResponse::index).containsExactly(0, 1, 2, 3);
+		assertThat(response.items()).extracting(IngestionBatchItemResponse::status).containsExactly(
+			IngestionItemStatus.CREATED, IngestionItemStatus.DUPLICATE, IngestionItemStatus.REJECTED,
+			IngestionItemStatus.REJECTED);
+		assertThat(response.items()).extracting(IngestionBatchItemResponse::usageEventId)
+			.containsExactly("usage-1", "usage-2", null, null);
+		assertThat(response.items()).extracting(IngestionBatchItemResponse::retryable)
+			.containsExactly(false, false, true, false);
+		assertThat(response.items()).extracting(IngestionBatchItemResponse::code)
+			.containsExactly(null, null, "INGESTION-503", "INGESTION-409");
+		assertThat(response.createdCount()).isEqualTo(1);
+		assertThat(response.duplicateCount()).isEqualTo(1);
+		assertThat(response.acceptedCount()).isEqualTo(2);
+		assertThat(response.rejectedCount()).isEqualTo(2);
+		assertThat(response.rejectedItems()).extracting(RejectedIngestionItemResponse::retryable)
+			.containsExactly(true, false);
+	}
+
+	@Test
+	void batchRejectsNullItemWithoutCallingTheService() {
+		given(usageLogService.createIdempotent(any())).willReturn(result("usage-1", false));
+
+		IngestionBatchResponse response = ingestionService.collectBatch("key", new IngestionBatchRequest(
+			"support-copilot", "prod", java.util.Arrays.asList(item("req-1", null), null)
+		));
+
+		assertThat(response.items()).hasSize(2);
+		assertThat(response.items().get(1).status()).isEqualTo(IngestionItemStatus.REJECTED);
+		assertThat(response.items().get(1).requestId()).isNull();
+		assertThat(response.items().get(1).code()).isEqualTo("COMMON-400");
+		assertThat(response.items().get(1).retryable()).isFalse();
+		verify(usageLogService, times(1)).createIdempotent(any());
 	}
 }
