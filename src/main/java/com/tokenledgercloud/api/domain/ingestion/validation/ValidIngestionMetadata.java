@@ -15,7 +15,10 @@ import java.lang.annotation.Target;
 import jakarta.validation.Constraint;
 import jakarta.validation.Payload;
 
-/** Ingestion metadata must not carry raw prompt/response keys and (in strict mode) must follow the allowed format. */
+/**
+ * Strict mode: ingestion metadata must not carry raw prompt/response keys and must follow the allowed format.
+ * Default mode: forbidden keys are dropped before storage (see {@link IngestionMetadataPolicy#sanitize}).
+ */
 @Documented
 @Constraint(validatedBy = IngestionMetadataConstraintValidator.class)
 @Target({METHOD, FIELD, ANNOTATION_TYPE, CONSTRUCTOR, PARAMETER, TYPE_USE})

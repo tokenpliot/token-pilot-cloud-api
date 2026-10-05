@@ -70,18 +70,16 @@ class IngestionValidationResponseTest {
 	}
 
 	@Test
-	void forbiddenMetadataKeyIs400WithoutReflectingTheValue() throws Exception {
+	void forbiddenMetadataKeyDoesNotFailValidationAndIsNotReflected() throws Exception {
+		// default (non-strict) mode: the request is accepted; the service drops the key before storing it
+		given(ingestionService.collectEvent(any(), any())).willReturn(new IngestionEventResponse("usage-1", true));
+
 		var result = mockMvc().perform(post("/api/ingestion/events")
 				.contentType(MediaType.APPLICATION_JSON)
 				.content(event(", \"metadata\": {\"prompt\": \"TOP-SECRET-PROMPT-TEXT\"}")))
-			.andExpect(status().isBadRequest())
-			.andExpect(jsonPath("$.success").value(false))
-			.andExpect(jsonPath("$.code").value("COMMON-400"))
-			.andExpect(jsonPath("$.errors[0].field").value("metadata"))
-			.andExpect(jsonPath("$.errors[0].rejectedValue").value(nullValue()));
+			.andExpect(status().isCreated());
 
 		assertThat(body(result)).doesNotContain("TOP-SECRET-PROMPT-TEXT");
-		verifyNoInteractions(ingestionService);
 	}
 
 	@Test

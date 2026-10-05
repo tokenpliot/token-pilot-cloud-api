@@ -22,7 +22,7 @@ import com.tokenledgercloud.api.domain.usage.dto.UsageLogCreateRequest;
  *
  * <p>Included, in this fixed order: provider, model, prompt/completion/reasoning/cachedPrompt tokens,
  * totalTokens, prompt/completion/reasoning/cachedPrompt/total cost, pricingPlanId, pricingVersion,
- * sourceType, metadata, occurredAt.
+ * sourceType, metadata (after forbidden keys were dropped), occurredAt.
  *
  * <p>Normalization, so semantically equal payloads hash equally:
  * <ul>

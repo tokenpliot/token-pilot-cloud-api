@@ -107,4 +107,42 @@ class IngestionMetadataPolicyTest {
 
 		assertThat(none.evaluate(Map.of("prompt", "x")).forbiddenKey()).isNull();
 	}
+
+	// --- sanitize: default mode drops forbidden keys instead of rejecting ---
+
+	@Test
+	void sanitizeDropsForbiddenKeysAtAnyDepthAndKeepsTheRest() {
+		Map<String, Object> input = new HashMap<>();
+		input.put("feature", "summary");
+		input.put("PROMPT", "SECRET-1");
+		input.put("ctx", Map.of("Messages", List.of("SECRET-2"), "keep", "yes"));
+		input.put("turns", List.of(Map.of("content", "SECRET-3", "role", "user")));
+
+		IngestionMetadataPolicy.Sanitized sanitized = policy.sanitize(input);
+
+		assertThat(sanitized.removed()).isEqualTo(3);
+		assertThat(sanitized.metadata().toString()).doesNotContain("SECRET").doesNotContainIgnoringCase("prompt")
+			.doesNotContainIgnoringCase("messages").doesNotContain("content");
+		assertThat(sanitized.metadata()).containsEntry("feature", "summary")
+			.containsEntry("ctx", Map.of("keep", "yes"))
+			.containsEntry("turns", List.of(Map.of("role", "user")));
+		assertThat(policy.evaluate(sanitized.metadata()).forbiddenKey()).isNull();
+		// the input is not modified
+		assertThat(input).containsKey("PROMPT");
+	}
+
+	@Test
+	void sanitizeOfOnlyForbiddenKeysIsNull() {
+		assertThat(policy.sanitize(Map.of("prompt", "x", "content", "y")))
+			.isEqualTo(new IngestionMetadataPolicy.Sanitized(null, 2));
+		assertThat(policy.sanitize(null).metadata()).isNull();
+		assertThat(policy.sanitize(Map.of()).metadata()).isNull();
+	}
+
+	@Test
+	void sanitizeWithoutForbiddenKeysChangesNothing() {
+		Map<String, Object> input = Map.of("feature", "summary");
+
+		assertThat(policy.sanitize(input)).isEqualTo(new IngestionMetadataPolicy.Sanitized(input, 0));
+	}
 }

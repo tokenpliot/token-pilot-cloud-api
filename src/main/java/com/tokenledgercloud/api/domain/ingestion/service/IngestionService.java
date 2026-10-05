@@ -21,6 +21,7 @@ import com.tokenledgercloud.api.domain.ingestion.dto.IngestionEventRequest;
 import com.tokenledgercloud.api.domain.ingestion.dto.IngestionEventResponse;
 import com.tokenledgercloud.api.domain.ingestion.dto.IngestionItemStatus;
 import com.tokenledgercloud.api.domain.ingestion.dto.RejectedIngestionItemResponse;
+import com.tokenledgercloud.api.domain.ingestion.validation.IngestionMetadataPolicy;
 import com.tokenledgercloud.api.domain.usage.dto.UsageLogCreateRequest;
 import com.tokenledgercloud.api.domain.usage.dto.UsageLogCreateResult;
 import com.tokenledgercloud.api.domain.usage.service.UsageLogService;
@@ -38,6 +39,7 @@ public class IngestionService {
 	private final ProjectApiKeyAuthenticator projectApiKeyAuthenticator;
 	private final UsageLogService usageLogService;
 	private final Validator validator;
+	private final IngestionMetadataPolicy metadataPolicy;
 	private final ObjectMapper objectMapper = new ObjectMapper();
 
 	// No surrounding transaction: authentication and each usage-log write run in their own short transactions.
@@ -199,12 +201,17 @@ public class IngestionService {
 		);
 	}
 
+	/**
+	 * Forbidden keys are dropped here, whatever the validation mode, so they never reach the database, and the
+	 * payload fingerprint (computed from this JSON) is taken without them.
+	 */
 	private String metadataJson(Map<String, Object> metadata) {
-		if (metadata == null || metadata.isEmpty()) {
+		Map<String, Object> cleaned = metadataPolicy.sanitize(metadata).metadata();
+		if (cleaned == null || cleaned.isEmpty()) {
 			return null;
 		}
 		try {
-			return objectMapper.writeValueAsString(metadata);
+			return objectMapper.writeValueAsString(cleaned);
 		} catch (JsonProcessingException exception) {
 			throw new ApiException(ErrorCode.INVALID_INPUT, "metadata must be JSON serializable.");
 		}

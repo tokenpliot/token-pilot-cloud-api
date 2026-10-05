@@ -143,31 +143,47 @@ class IngestionRequestValidationTest {
 	// --- forbidden keys ---
 
 	@Test
-	void forbiddenKeyIsRejectedWithItsConfiguredNameButNotItsValue() {
-		Set<ConstraintViolation<IngestionEventRequest>> violations = validator(IngestionProperties.defaults())
+	void strictModeRejectsAForbiddenKeyWithoutNamingItOrItsValue() {
+		Set<ConstraintViolation<IngestionEventRequest>> violations = validator(props(true, "prompt"))
 			.validate(event(Map.of("Prompt", "TOP-SECRET-PROMPT-TEXT"), null));
 
 		assertThat(violations).singleElement().satisfies(violation -> {
 			assertThat(violation.getPropertyPath().toString()).isEqualTo("metadata");
-			assertThat(violation.getMessage()).contains("prompt").doesNotContain("TOP-SECRET-PROMPT-TEXT");
+			assertThat(violation.getMessage()).isEqualTo("metadata contains a forbidden key")
+				.doesNotContainIgnoringCase("prompt").doesNotContain("TOP-SECRET-PROMPT-TEXT");
 		});
 	}
 
 	@Test
-	void forbiddenKeyIsRejectedOnBatchItemsToo() {
-		assertThat(validator(IngestionProperties.defaults()).validate(item(Map.of("messages", "x"))))
+	void strictModeRejectsAForbiddenKeyOnBatchItemsToo() {
+		assertThat(validator(props(true, "messages")).validate(item(Map.of("messages", "x"))))
 			.singleElement().satisfies(v -> assertThat(v.getPropertyPath().toString()).isEqualTo("metadata"));
 	}
 
 	@Test
-	void forbiddenKeyIsRejectedInStrictAndNonStrictMode() {
-		assertThat(validator(props(false, "prompt")).validate(event(Map.of("prompt", "x"), null))).hasSize(1);
-		assertThat(validator(props(true, "prompt")).validate(event(Map.of("prompt", "x"), null))).hasSize(1);
+	void defaultModePassesAForbiddenKeyAndLogsOnlyKindAndCount() {
+		assertThat(validator(props(false, "prompt")).validate(event(Map.of("Prompt", "TOP-SECRET-PROMPT-TEXT"), null)))
+			.isEmpty();
+
+		assertThat(logs.list).singleElement().satisfies(entry -> {
+			assertThat(entry.getFormattedMessage()).contains("FORBIDDEN_KEY").contains("count=1")
+				.doesNotContainIgnoringCase("prompt").doesNotContain("TOP-SECRET-PROMPT-TEXT");
+		});
+	}
+
+	@Test
+	void defaultModeStillJudgesTheFormatOfTheRemainingMetadata() {
+		// only the forbidden key is removed; a loose-format rest is a warning, not a rejection
+		assertThat(validator(props(false, "prompt")).validate(event(Map.of("prompt", "x", "Bad-Key", "v"), null)))
+			.isEmpty();
+		assertThat(logs.list).hasSize(2);
+		assertThat(logs.list.get(1).getFormattedMessage()).contains("INVALID_KEY_FORMAT")
+			.doesNotContain("Bad-Key");
 	}
 
 	@Test
 	void forbiddenListFromConfigurationIsUsed() {
-		Validator validator = validator(props(false, "secret_note"));
+		Validator validator = validator(props(true, "secret_note"));
 
 		assertThat(validator.validate(event(Map.of("secret_note", "x"), null))).hasSize(1);
 		assertThat(validator.validate(event(Map.of("prompt", "x"), null))).isEmpty();

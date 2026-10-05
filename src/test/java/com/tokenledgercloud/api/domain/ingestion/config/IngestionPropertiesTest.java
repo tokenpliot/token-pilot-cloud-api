@@ -63,6 +63,15 @@ class IngestionPropertiesTest {
 			.run(context -> {
 				LocalValidatorFactoryBean validator = context.getBean(LocalValidatorFactoryBean.class);
 
+				// the validator only rejects forbidden keys in strict mode; here it must still not reject "prompt"
+				assertThat(validator.validate(event(Map.of("secret_note", "x")))).isEmpty();
+				assertThat(validator.validate(event(Map.of("prompt", "x")))).isEmpty();
+			});
+		runner.withPropertyValues("token-pilot.ingestion.forbidden-metadata-keys=secret_note",
+				"token-pilot.ingestion.strict-metadata=true")
+			.run(context -> {
+				LocalValidatorFactoryBean validator = context.getBean(LocalValidatorFactoryBean.class);
+
 				assertThat(validator.validate(event(Map.of("secret_note", "x")))).hasSize(1);
 				assertThat(validator.validate(event(Map.of("prompt", "x")))).isEmpty();
 			});

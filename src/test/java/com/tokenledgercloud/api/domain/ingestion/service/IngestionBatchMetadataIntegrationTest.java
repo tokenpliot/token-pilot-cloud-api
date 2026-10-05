@@ -61,7 +61,7 @@ class IngestionBatchMetadataIntegrationTest {
 	}
 
 	@Test
-	void forbiddenKeysRejectOnlyTheirItemAndLooseFormatStillPasses() {
+	void forbiddenKeysAreDroppedAndTheItemIsStoredWhileLooseFormatStillPasses() {
 		Map<String, Object> sloppy = new HashMap<>();
 		for (int i = 0; i < 17; i++) {
 			sloppy.put("k" + i, "v");
@@ -71,27 +71,27 @@ class IngestionBatchMetadataIntegrationTest {
 		IngestionBatchResponse response = ingestionService.collectBatch("key", new IngestionBatchRequest(
 			"support-copilot", "prod", List.of(
 				item("req-ok", Map.of("feature", "summary")),
-				item("req-prompt", Map.of("prompt", "SECRET-ITEM-TEXT")),
+				item("req-prompt", Map.of("prompt", "SECRET-ITEM-TEXT", "feature", "kept")),
 				item("req-sloppy", sloppy),
-				item("req-nested", Map.of("ctx", Map.of("messages", List.of("SECRET-NESTED-TEXT")))))));
+				item("req-nested", Map.of("ctx", Map.of("messages", List.of("SECRET-NESTED-TEXT"), "a", "b"))))));
 
-		assertThat(response.items()).extracting(IngestionBatchItemResponse::status).containsExactly(
-			IngestionItemStatus.CREATED, IngestionItemStatus.REJECTED, IngestionItemStatus.CREATED,
-			IngestionItemStatus.REJECTED);
-		assertThat(response.items().get(1).code()).isEqualTo("COMMON-400");
-		assertThat(response.items().get(1).retryable()).isFalse();
-		assertThat(response.items().get(1).message()).contains("prompt");
-		assertThat(response.items().get(3).message()).contains("messages");
-		assertThat(response.items().get(1).message() + response.items().get(3).message())
-			.doesNotContain("SECRET-ITEM-TEXT", "SECRET-NESTED-TEXT");
-		assertThat(response.rejectedItems()).extracting(r -> r.requestId()).containsExactly("req-prompt", "req-nested");
+		assertThat(response.items()).extracting(IngestionBatchItemResponse::status)
+			.containsOnly(IngestionItemStatus.CREATED);
+		assertThat(response.rejectedItems()).isEmpty();
+		assertThat(response.toString()).doesNotContain("SECRET-ITEM-TEXT", "SECRET-NESTED-TEXT");
 
-		// rejected items are not stored; the loosely formatted one is stored untouched (non-strict default)
 		assertThat(usageLogRepository.findAll()).extracting(UsageLog::getRequestId)
-			.containsExactlyInAnyOrder("req-ok", "req-sloppy");
-		UsageLog sloppyRow = usageLogRepository.findAll().stream()
-			.filter(log -> "req-sloppy".equals(log.getRequestId())).findFirst().orElseThrow();
+			.containsExactlyInAnyOrder("req-ok", "req-prompt", "req-sloppy", "req-nested");
+		assertThat(metadataOf("req-prompt")).contains("feature", "kept")
+			.doesNotContain("SECRET-ITEM-TEXT", "prompt");
+		assertThat(metadataOf("req-nested")).contains("ctx", "a", "b")
+			.doesNotContain("SECRET-NESTED-TEXT", "messages");
 		// H2 keeps a json column as an escaped JSON string; compare content, not quoting
-		assertThat(sloppyRow.getMetadataJson()).contains("count", "k16", "k0");
+		assertThat(metadataOf("req-sloppy")).contains("count", "k16", "k0");
+	}
+
+	private String metadataOf(String requestId) {
+		return usageLogRepository.findAll().stream()
+			.filter(log -> requestId.equals(log.getRequestId())).findFirst().orElseThrow().getMetadataJson();
 	}
 }

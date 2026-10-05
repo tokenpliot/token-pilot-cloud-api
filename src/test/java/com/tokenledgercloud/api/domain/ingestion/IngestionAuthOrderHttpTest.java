@@ -111,10 +111,10 @@ class IngestionAuthOrderHttpTest {
 	}
 
 	@Test
-	void missingKeyWithAForbiddenMetadataKeyIs400BecauseValidationComesFirst() throws Exception {
+	void missingKeyWithAForbiddenMetadataKeyIs401InDefaultModeBecauseTheKeyIsNotAValidationError() throws Exception {
 		HttpResponse<String> response = post(event(", \"metadata\": {\"prompt\": \"SECRET-TEXT\"}"), null);
 
-		assertThat(response.statusCode()).isEqualTo(400);
+		assertThat(response.statusCode()).isEqualTo(401);
 		assertThat(response.body()).doesNotContain("SECRET-TEXT");
 	}
 

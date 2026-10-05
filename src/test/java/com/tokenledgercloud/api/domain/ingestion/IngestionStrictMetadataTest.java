@@ -49,7 +49,10 @@ class IngestionStrictMetadataTest {
 
 	@Test
 	void forbiddenKeysStillRejected() {
-		assertThat(validator.validate(event(Map.of("prompt", "x")))).extracting(ConstraintViolation::getMessage)
-			.singleElement().asString().contains("prompt");
+		assertThat(validator.validate(event(Map.of("prompt", "SECRET-VALUE")))).extracting(ConstraintViolation::getMessage)
+			.singleElement().asString().isEqualTo("metadata contains a forbidden key")
+			.doesNotContain("prompt", "SECRET-VALUE");
+		assertThat(validator.validate(event(Map.of("ctx", Map.of("Messages", java.util.List.of("x"))))))
+			.hasSize(1);
 	}
 }

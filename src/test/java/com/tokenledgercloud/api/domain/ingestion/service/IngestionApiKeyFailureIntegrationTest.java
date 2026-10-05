@@ -90,7 +90,7 @@ class IngestionApiKeyFailureIntegrationTest {
 		);
 	}
 
-	/** Valid items plus one with a forbidden metadata key: none of them may be reached with a bad key. */
+	/** Valid items plus one with a forbidden metadata key (dropped, not rejected): none of them may be reached with a bad key. */
 	private static IngestionBatchRequest batch(String environment) {
 		return new IngestionBatchRequest(PROJECT_KEY, environment, List.of(
 			item("req-1", null),
@@ -212,11 +212,11 @@ class IngestionApiKeyFailureIntegrationTest {
 
 		IngestionBatchResponse response = ingestionService.collectBatch(key.raw(), batch("prod"));
 
-		// the forbidden-key item is judged per item once the key is accepted
+		// the forbidden-key item is stored without that key once the key is accepted
 		assertThat(response.items()).extracting(IngestionBatchItemResponse::status).containsExactly(
-			IngestionItemStatus.CREATED, IngestionItemStatus.REJECTED, IngestionItemStatus.CREATED);
+			IngestionItemStatus.CREATED, IngestionItemStatus.CREATED, IngestionItemStatus.CREATED);
 		List<UsageLog> rows = usageLogRepository.findAll();
-		assertThat(rows).hasSize(2).allSatisfy(row -> {
+		assertThat(rows).hasSize(3).allSatisfy(row -> {
 			assertThat(row.getOrganizationId()).isEqualTo(ProjectKeyFixtures.ORG);
 			assertThat(row.getProjectId()).isEqualTo(project.getId());
 			assertThat(row.getApiKeyId()).isEqualTo(key.row().getId());

@@ -18,6 +18,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.tokenledgercloud.api.domain.ingestion.dto.IngestionBatchItemResponse;
@@ -28,6 +29,8 @@ import com.tokenledgercloud.api.domain.ingestion.dto.IngestionEventRequest;
 import com.tokenledgercloud.api.domain.ingestion.dto.IngestionEventResponse;
 import com.tokenledgercloud.api.domain.ingestion.dto.IngestionItemStatus;
 import com.tokenledgercloud.api.domain.ingestion.dto.RejectedIngestionItemResponse;
+import com.tokenledgercloud.api.domain.ingestion.config.IngestionProperties;
+import com.tokenledgercloud.api.domain.ingestion.validation.IngestionMetadataPolicy;
 import com.tokenledgercloud.api.domain.usage.dto.UsageLogCreateRequest;
 import com.tokenledgercloud.api.domain.usage.dto.UsageLogCreateResult;
 import com.tokenledgercloud.api.domain.usage.dto.UsageLogResponse;
@@ -48,6 +51,9 @@ class IngestionServiceTest {
 
 	@Mock
 	private Validator validator;
+
+	@Spy
+	private IngestionMetadataPolicy metadataPolicy = new IngestionMetadataPolicy(IngestionProperties.defaults());
 
 	@InjectMocks
 	private IngestionService ingestionService;

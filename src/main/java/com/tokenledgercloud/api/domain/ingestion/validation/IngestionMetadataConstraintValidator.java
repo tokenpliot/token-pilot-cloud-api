@@ -3,7 +3,6 @@ package com.tokenledgercloud.api.domain.ingestion.validation;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-import org.hibernate.validator.constraintvalidation.HibernateConstraintValidatorContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,11 +14,13 @@ import jakarta.validation.ConstraintValidator;
 import jakarta.validation.ConstraintValidatorContext;
 
 /**
- * Forbidden raw-text keys are always rejected. Other format violations are logged and let through unless
- * {@code token-pilot.ingestion.strict-metadata} is on, so existing SDK calls keep working.
+ * Strict mode ({@code token-pilot.ingestion.strict-metadata}) rejects forbidden raw-text keys and any format
+ * violation. The default mode lets the request through: forbidden keys are dropped later, before storage
+ * ({@link IngestionMetadataPolicy#sanitize}), and format violations are only logged, so existing SDK calls keep
+ * working.
  *
  * <p>Spring injects the bound {@link IngestionProperties}; plain Bean Validation (no Spring) uses the no-arg
- * constructor with the built-in defaults. Logs carry violation kinds and counts only, never keys or values.
+ * constructor with the built-in defaults. Logs and error messages carry violation kinds and counts only, never keys or values.
  */
 public class IngestionMetadataConstraintValidator implements ConstraintValidator<ValidIngestionMetadata, Map<String, Object>> {
 
@@ -47,13 +48,17 @@ public class IngestionMetadataConstraintValidator implements ConstraintValidator
 		Evaluation evaluation = policy.evaluate(metadata);
 
 		if (evaluation.forbiddenKey() != null) {
-			context.disableDefaultConstraintViolation();
-			// The key is one of the configured forbidden names, not free-form client input.
-			context.unwrap(HibernateConstraintValidatorContext.class)
-				.addMessageParameter("key", evaluation.forbiddenKey())
-				.buildConstraintViolationWithTemplate("metadata must not contain raw text field '{key}'")
-				.addConstraintViolation();
-			return false;
+			if (strict) {
+				context.disableDefaultConstraintViolation();
+				context.buildConstraintViolationWithTemplate("metadata contains a forbidden key")
+					.addConstraintViolation();
+				return false;
+			}
+			// Default mode: the key is dropped before storage; judge the rest of the format without it.
+			int removed = policy.sanitize(metadata).removed();
+			log.warn("Ingestion metadata contained forbidden keys that were dropped: kind=FORBIDDEN_KEY, count={}",
+				removed);
+			evaluation = policy.evaluate(policy.sanitize(metadata).metadata());
 		}
 
 		if (evaluation.violations().isEmpty()) {

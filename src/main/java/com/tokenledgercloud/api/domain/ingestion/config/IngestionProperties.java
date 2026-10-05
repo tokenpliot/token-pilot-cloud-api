@@ -11,8 +11,8 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  *
  * @param maxEventBytes         largest accepted body of {@code POST /api/ingestion/events}
  * @param maxBatchBytes         largest accepted body of {@code POST /api/ingestion/events/batch}
- * @param forbiddenMetadataKeys metadata keys (any depth, case-insensitive) that suggest raw prompt or response text
- * @param strictMetadata        when true, metadata outside the allowed format is rejected instead of only logged
+ * @param forbiddenMetadataKeys metadata keys (any depth, case-insensitive) that suggest raw prompt or response text; dropped before storage, or rejected in strict mode
+ * @param strictMetadata        when true, forbidden keys and metadata outside the allowed format are rejected instead of dropped / only logged
  */
 @ConfigurationProperties(prefix = "token-pilot.ingestion")
 public record IngestionProperties(

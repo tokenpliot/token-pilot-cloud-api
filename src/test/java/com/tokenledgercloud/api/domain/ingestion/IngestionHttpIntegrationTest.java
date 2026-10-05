@@ -243,17 +243,14 @@ class IngestionHttpIntegrationTest {
 	// --- configuration drives the forbidden keys, with the Spring-injected validator ---
 
 	@Test
-	void forbiddenKeyFromConfigurationIs400AndNothingIsStored() throws Exception {
+	void forbiddenKeyFromConfigurationIsDroppedBeforeStorage() throws Exception {
 		HttpResponse<String> response = post("/api/ingestion/events",
-			eventJson("req-secret", ", \"metadata\": {\"secret_note\": \"CONFIDENTIAL-TEXT\"}"));
+			eventJson("req-secret", ", \"metadata\": {\"secret_note\": \"CONFIDENTIAL-TEXT\", \"feature\": \"x\"}"));
 
-		assertThat(response.statusCode()).isEqualTo(400);
-		JsonNode body = parse(response);
-		assertThat(body.path("code").asText()).isEqualTo("COMMON-400");
-		assertThat(body.path("errors").get(0).path("field").asText()).isEqualTo("metadata");
-		assertThat(body.path("errors").get(0).path("rejectedValue").isNull()).isTrue();
-		assertThat(response.body()).doesNotContain("CONFIDENTIAL-TEXT");
-		assertThat(usageLogRepository.count()).isZero();
+		assertThat(response.statusCode()).isEqualTo(201);
+		assertThat(response.body()).doesNotContain("CONFIDENTIAL-TEXT").doesNotContain("secret_note");
+		assertThat(usageLogRepository.findAll()).singleElement().satisfies(row ->
+			assertThat(row.getMetadataJson()).contains("feature").doesNotContain("CONFIDENTIAL-TEXT", "secret_note"));
 	}
 
 	@Test

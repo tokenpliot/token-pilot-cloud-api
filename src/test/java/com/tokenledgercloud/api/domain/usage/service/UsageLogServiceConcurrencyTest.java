@@ -188,6 +188,47 @@ class UsageLogServiceConcurrencyTest {
 		}
 	}
 
+	/*
+	 * Same requestId, different eventId. The two unique keys (event_id and request_id) disagree about whether the
+	 * requests are the same call, so the request_id key must turn the later ones into 409, never a 500.
+	 * Like everything in this class this runs on H2, not MySQL: it proves the application logic against real unique
+	 * constraints, but not MySQL's lock and error behaviour.
+	 */
+
+	@Test
+	void sequentialNewEventIdReusingARequestIdIsConflictAgainstTheRealUniqueKeys() {
+		usageLogService.createIdempotent(request("req-seq", "evt-1", 1200L));
+
+		assertThatThrownBy(() -> usageLogService.createIdempotent(request("req-seq", "evt-2", 1200L)))
+			.isInstanceOfSatisfying(ApiException.class,
+				e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.IDEMPOTENCY_CONFLICT));
+		assertThat(usageLogRepository.count()).isEqualTo(1);
+		assertThat(usageLogRepository.findAll().get(0).getEventId()).isEqualTo("evt-1");
+	}
+
+	@Test
+	void concurrentSameRequestIdWithDifferentEventIdsLetExactlyOneSucceedAndTheRestConflict() throws Exception {
+		for (int round = 0; round < ROUNDS; round++) {
+			List<UsageLogCreateRequest> requests = new ArrayList<>();
+			for (int i = 0; i < THREADS; i++) {
+				requests.add(request("req-" + round, "evt-" + round + "-" + i, 1200L));
+			}
+
+			List<Outcome> outcomes = runConcurrently(requests);
+
+			// any outcome other than created/conflict (a 500, a retry-later) fails here with its error
+			assertThat(outcomes).filteredOn(o -> !o.created() && !o.conflict())
+				.as("outcomes that are neither created nor 409: %s", outcomes).isEmpty();
+			assertThat(outcomes).filteredOn(Outcome::created).hasSize(1);
+			assertThat(outcomes).filteredOn(Outcome::conflict).hasSize(THREADS - 1);
+			assertThat(usageLogRepository.count()).isEqualTo(1);
+
+			int winner = outcomes.indexOf(outcomes.stream().filter(Outcome::created).findFirst().orElseThrow());
+			assertThat(usageLogRepository.findAll().get(0).getEventId()).isEqualTo("evt-" + round + "-" + winner);
+			usageLogRepository.deleteAll();
+		}
+	}
+
 	@Test
 	void concurrentMixOfTwoPayloadsKeepsOnlyTheWinnersPayload() throws Exception {
 		for (int round = 0; round < ROUNDS; round++) {
