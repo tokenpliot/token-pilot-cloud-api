@@ -10,7 +10,7 @@ import com.tokenledgercloud.api.domain.ingestion.validation.SupportedSchemaVersi
 
 public record IngestionBatchRequest(
 	@NotBlank String projectKey,
-	@NotBlank String environment,
+	@NotBlank @Size(max = 20) String environment,
 	@NotEmpty @Size(max = 100) List<IngestionEventItemRequest> items,
 	@SupportedSchemaVersion String schemaVersion
 ) {

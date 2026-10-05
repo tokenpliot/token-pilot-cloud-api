@@ -13,9 +13,9 @@ import jakarta.validation.constraints.Size;
 import com.tokenledgercloud.api.domain.ingestion.validation.ValidIngestionMetadata;
 
 public record IngestionEventItemRequest(
-	@NotBlank String requestId,
-	@NotBlank String provider,
-	@NotBlank String model,
+	@NotBlank @Size(max = 100) String requestId,
+	@NotBlank @Size(max = 50) String provider,
+	@NotBlank @Size(max = 100) String model,
 	@NotNull @PositiveOrZero Long promptTokens,
 	@NotNull @PositiveOrZero Long completionTokens,
 	@PositiveOrZero Long reasoningTokens,
@@ -26,9 +26,9 @@ public record IngestionEventItemRequest(
 	@DecimalMin("0.000000") BigDecimal reasoningCostUsd,
 	@DecimalMin("0.000000") BigDecimal cachedPromptCostUsd,
 	@DecimalMin("0.000000") BigDecimal totalCostUsd,
-	String pricingPlanId,
-	@NotBlank String pricingVersion,
-	String sourceType,
+	@Size(max = 36) String pricingPlanId,
+	@NotBlank @Size(max = 50) String pricingVersion,
+	@Size(max = 30) String sourceType,
 	@ValidIngestionMetadata Map<String, Object> metadata,
 	@NotNull OffsetDateTime occurredAt,
 	@Size(max = 100) String eventId

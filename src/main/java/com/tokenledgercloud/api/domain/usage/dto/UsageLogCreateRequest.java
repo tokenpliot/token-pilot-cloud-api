@@ -7,15 +7,16 @@ import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.PositiveOrZero;
+import jakarta.validation.constraints.Size;
 
 public record UsageLogCreateRequest(
-	@NotBlank String organizationId,
-	@NotBlank String projectId,
-	String apiKeyId,
-	@NotBlank String environment,
-	String requestId,
-	@NotBlank String provider,
-	@NotBlank String model,
+	@NotBlank @Size(max = 36) String organizationId,
+	@NotBlank @Size(max = 36) String projectId,
+	@Size(max = 36) String apiKeyId,
+	@NotBlank @Size(max = 20) String environment,
+	@Size(max = 100) String requestId,
+	@NotBlank @Size(max = 50) String provider,
+	@NotBlank @Size(max = 100) String model,
 	@NotNull @PositiveOrZero Long promptTokens,
 	@NotNull @PositiveOrZero Long completionTokens,
 	@PositiveOrZero Long reasoningTokens,
@@ -26,12 +27,12 @@ public record UsageLogCreateRequest(
 	@DecimalMin("0.000000") BigDecimal reasoningCostUsd,
 	@DecimalMin("0.000000") BigDecimal cachedPromptCostUsd,
 	BigDecimal totalCostUsd,
-	String pricingPlanId,
-	@NotBlank String pricingVersion,
-	String sourceType,
+	@Size(max = 36) String pricingPlanId,
+	@NotBlank @Size(max = 50) String pricingVersion,
+	@Size(max = 30) String sourceType,
 	String metadataJson,
 	@NotNull LocalDateTime occurredAt,
-	String eventId
+	@Size(max = 100) String eventId
 ) {
 
 	/** Legacy shape without {@code eventId}; the idempotency key falls back to {@code requestId}. */
