@@ -111,3 +111,22 @@ RESERVED ──▶ IN_FLIGHT ──▶ COMMITTED
 - 기본값이 `OBSERVE`이므로 연결 직후 고객 provider 호출이 Token Pilot 때문에 실패하지 않는다.
 - 클라이언트 SDK(`tokenpliot/tokenpilot`)는 `EnforcementSettings`와 오류 매핑 규칙을 같은 의미로 구현해야 한다. 서버 저장소의 계약 테스트(`DecisionContractTest`, `ControlPlaneOpenApiContractTest`)가 기준이다.
 - `ENFORCE`에서 고객이 `FAIL_CLOSED`를 고르면 Control Plane 가용성이 고객 호출 가용성에 영향을 준다. 이 위험은 고객이 명시적으로 선택한 경우에만 생긴다.
+
+## 부록 A. 기존 ingestion 경로 하위 호환 매핑 (#10)
+
+이 부록은 위의 결정을 바꾸지 않는다. 계약 초안(`control-plane-v1.yaml`)으로 가기 전에 운영 중인 `POST /api/ingestion/events`와 `POST /api/ingestion/events/batch`가 이 계약과 어디서 다른지 정리한 대응표이며, 기존 SDK 호출이 깨지지 않도록 경로, 성공 상태코드, 기존 응답 필드를 유지하고 필드만 추가했다. 전체 설명과 알려진 한계는 [`docs/api/ingestion-compat.md`](../api/ingestion-compat.md)에 있다.
+
+| 항목 | 계약(이 ADR과 `control-plane-v1.yaml`) | 기존 ingestion 경로(현재) |
+| --- | --- | --- |
+| 경로 | `POST /api/control/v1/usage-events` | `POST /api/ingestion/events` (+ `/batch`) |
+| 성공 상태코드 | `202` | 단건 `201`, 배치 `200` |
+| 멱등성 키 | `Idempotency-Key` 헤더(필수) | 헤더 미지원. 본문의 `(project, environment, eventId ?? requestId)` |
+| 키 충돌 | `409` `IDEMPOTENCY_CONFLICT` | `409` `INGESTION-409` |
+| 응답 필드 | `usageEventId`, `requestId`, `duplicate`, `settlementState`, `schemaVersion` | `eventId`, `accepted` 유지 + `duplicate`, `requestId` 추가 |
+| `schemaVersion` | 필수 | 선택(없으면 허용, 알 수 없는 값만 `400`) |
+| 알 수 없는 필드 | 거부 | 무시(저장·로깅 안 함) |
+| 오류 코드 | `INVALID_REQUEST` 등 문자열 | `COMMON-400/401/403/404`, `INGESTION-409/413/503` |
+| 오류 응답의 `data.outcome`, `Retry-After` | 있음 | 없음 |
+| 배치 | 정의 없음 | 항목별 결과를 반환하며 항목 단위로 저장(원자적이지 않음) |
+
+§6의 "같은 키와 같은 본문은 같은 결과, 같은 키에 다른 본문은 `409`"는 기존 경로에서도 지켜진다. 같은 키의 다른 본문은 예전에는 조용히 기존 이벤트를 반환했으나 이제 `409`이다.

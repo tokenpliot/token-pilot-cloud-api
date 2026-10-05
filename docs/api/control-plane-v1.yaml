@@ -906,3 +906,58 @@ components:
               const: false
             data:
               $ref: '#/components/schemas/ControlPlaneError'
+
+# 기존 ingestion 경로 하위 호환 매핑 (#10).
+# 이 문서는 목표 계약이고, 아래는 현행 `/api/ingestion/events`(+ `/batch`)가 이 계약과 어디서 다른지의 대응표다.
+# 계약 본문(paths, components)은 바꾸지 않았다. 자세한 내용: docs/api/ingestion-compat.md
+x-legacy-ingestion-compat:
+  description: 기존 ingestion 경로를 강화한 현재 구현과 이 계약의 차이. 호환을 위해 경로, 성공 상태코드, 기존 응답 필드는 유지하고 필드만 추가했다.
+  mappings:
+    - topic: 경로
+      contract: POST /api/control/v1/usage-events
+      legacy: POST /api/ingestion/events (+ POST /api/ingestion/events/batch)
+    - topic: 성공 상태코드
+      contract: "202"
+      legacy: 단건 201, 배치 200
+    - topic: 배치
+      contract: 정의 없음
+      legacy: /batch가 항목별 결과(items[], status CREATED/DUPLICATE/REJECTED, retryable)를 반환. 배치는 항목 단위로 저장되며 원자적이지 않다.
+    - topic: 멱등성 키
+      contract: Idempotency-Key 헤더(필수, 8~128자)
+      legacy: 헤더 없음(미지원). 본문의 (project, environment, eventId ?? requestId)
+    - topic: 키 충돌
+      contract: 409 IDEMPOTENCY_CONFLICT
+      legacy: 409 INGESTION-409
+    - topic: 재전송 응답
+      contract: duplicate true
+      legacy: duplicate true (상태코드는 그대로 201)
+    - topic: 응답 필드
+      contract: usageEventId, requestId, duplicate, settlementState, schemaVersion
+      legacy: eventId, accepted 유지 + duplicate, requestId 추가. settlementState와 schemaVersion은 없음
+    - topic: schemaVersion
+      contract: 필수, 2026-10-01 고정
+      legacy: 선택. 없으면 허용, 있으면 2026-10-01만 허용(그 외 400)
+    - topic: 프로젝트 식별
+      contract: 키만으로 식별(본문에 없음)
+      legacy: 본문의 projectKey가 키의 프로젝트와 일치해야 함
+    - topic: 요청 구조
+      contract: callStatus 필수, usage와 cost 중첩
+      legacy: 평면 구조(promptTokens, promptCostUsd 등), callStatus 없음
+    - topic: 알 수 없는 필드
+      contract: additionalProperties false로 거부
+      legacy: 무시(prompt 같은 필드도 거부하지 않음). 저장·로깅은 하지 않음
+    - topic: metadata
+      contract: 문자열 값만, 16개 이하, 값 256자 이하
+      legacy: 금지 키(prompt, system_prompt, completion, messages, content, response)만 400. 형식 위반은 경고 로그만 남기고 통과(엄격 모드는 계약과 같은 규칙으로 거부)
+    - topic: 오류 코드
+      contract: INVALID_REQUEST, UNAUTHORIZED, NOT_FOUND, IDEMPOTENCY_CONFLICT, RATE_LIMITED, CONTROL_PLANE_UNAVAILABLE
+      legacy: COMMON-400, COMMON-401, COMMON-403, COMMON-404, INGESTION-409, INGESTION-413, INGESTION-503
+    - topic: 오류 응답의 data.outcome
+      contract: INDETERMINATE 또는 CONTROL_PLANE_UNAVAILABLE
+      legacy: 없음
+    - topic: Retry-After
+      contract: 429와 503에 제공
+      legacy: 제공하지 않음(INGESTION-503에도 없음)
+    - topic: 요청 크기 제한
+      contract: 정의 없음
+      legacy: 단건 16KB, 배치 1MB 초과 시 413 INGESTION-413 (설정으로 변경 가능)
