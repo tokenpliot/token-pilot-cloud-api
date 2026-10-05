@@ -19,6 +19,8 @@ public interface UsageLogRepository extends JpaRepository<UsageLog, String> {
 
 	Optional<UsageLog> findByProjectIdAndEnvironmentAndRequestId(String projectId, String environment, String requestId);
 
+	Optional<UsageLog> findByProjectIdAndEnvironmentAndEventId(String projectId, String environment, String eventId);
+
 	@Query("""
 	select coalesce(sum(u.totalCostUsd), 0) as totalCost,
 	       coalesce(sum(u.totalTokens), 0) as totalTokens,
