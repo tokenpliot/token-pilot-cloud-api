@@ -46,7 +46,8 @@ public class GlobalExceptionHandler {
 	private ApiFieldError toApiFieldError(FieldError fieldError) {
 		return new ApiFieldError(
 			fieldError.getField(),
-			fieldError.getRejectedValue(),
+			// The rejected input is never echoed back: it may be sensitive (e.g. metadata text).
+			null,
 			fieldError.getDefaultMessage()
 		);
 	}

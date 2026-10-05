@@ -10,6 +10,9 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 
+import com.tokenledgercloud.api.domain.ingestion.validation.SupportedSchemaVersion;
+import com.tokenledgercloud.api.domain.ingestion.validation.ValidIngestionMetadata;
+
 public record IngestionEventRequest(
 	@NotBlank String projectKey,
 	@NotBlank String environment,
@@ -29,9 +32,10 @@ public record IngestionEventRequest(
 	String pricingPlanId,
 	@NotBlank String pricingVersion,
 	String sourceType,
-	Map<String, Object> metadata,
+	@ValidIngestionMetadata Map<String, Object> metadata,
 	@NotNull OffsetDateTime occurredAt,
-	@Size(max = 100) String eventId
+	@Size(max = 100) String eventId,
+	@SupportedSchemaVersion String schemaVersion
 ) {
 
 	/** Legacy shape without {@code eventId}; the idempotency key falls back to {@code requestId}. */
@@ -60,6 +64,36 @@ public record IngestionEventRequest(
 		this(projectKey, environment, requestId,
 			provider, model, promptTokens, completionTokens, reasoningTokens, cachedPromptTokens,
 			totalTokens, promptCostUsd, completionCostUsd, reasoningCostUsd, cachedPromptCostUsd, totalCostUsd,
-			pricingPlanId, pricingVersion, sourceType, metadata, occurredAt, null);
+			pricingPlanId, pricingVersion, sourceType, metadata, occurredAt, null, null);
+	}
+
+	/** Shape without {@code schemaVersion}; an absent schemaVersion is accepted. */
+	public IngestionEventRequest(
+		String projectKey,
+		String environment,
+		String requestId,
+		String provider,
+		String model,
+		Long promptTokens,
+		Long completionTokens,
+		Long reasoningTokens,
+		Long cachedPromptTokens,
+		Long totalTokens,
+		BigDecimal promptCostUsd,
+		BigDecimal completionCostUsd,
+		BigDecimal reasoningCostUsd,
+		BigDecimal cachedPromptCostUsd,
+		BigDecimal totalCostUsd,
+		String pricingPlanId,
+		String pricingVersion,
+		String sourceType,
+		Map<String, Object> metadata,
+		OffsetDateTime occurredAt,
+		String eventId
+	) {
+		this(projectKey, environment, requestId,
+			provider, model, promptTokens, completionTokens, reasoningTokens, cachedPromptTokens,
+			totalTokens, promptCostUsd, completionCostUsd, reasoningCostUsd, cachedPromptCostUsd, totalCostUsd,
+			pricingPlanId, pricingVersion, sourceType, metadata, occurredAt, eventId, null);
 	}
 }

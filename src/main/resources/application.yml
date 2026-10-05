@@ -66,3 +66,13 @@ spring:
 jwt:
   secret: ${JWT_SECRET}
   expiration: 86400000 # 24시간 (밀리초 단위)
+
+# --- Ingestion limits and privacy (optional; the values below are the built-in defaults) ---
+# token-pilot:
+#   ingestion:
+#     max-event-bytes: 16384        # POST /api/ingestion/events body limit; larger requests get 413 (INGESTION-413)
+#     max-batch-bytes: 1048576      # POST /api/ingestion/events/batch body limit
+#     forbidden-metadata-keys: [prompt, system_prompt, completion, messages, content, response]
+#                                   # metadata keys (any depth, case-insensitive) rejected with 400 to keep raw text out
+#     strict-metadata: false        # true: metadata with >16 entries, bad key format, non-string or >256-char values
+#                                   # is rejected with 400; false: only a warning is logged (no keys or values)

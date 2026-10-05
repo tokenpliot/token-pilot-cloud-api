@@ -10,6 +10,8 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 
+import com.tokenledgercloud.api.domain.ingestion.validation.ValidIngestionMetadata;
+
 public record IngestionEventItemRequest(
 	@NotBlank String requestId,
 	@NotBlank String provider,
@@ -27,7 +29,7 @@ public record IngestionEventItemRequest(
 	String pricingPlanId,
 	@NotBlank String pricingVersion,
 	String sourceType,
-	Map<String, Object> metadata,
+	@ValidIngestionMetadata Map<String, Object> metadata,
 	@NotNull OffsetDateTime occurredAt,
 	@Size(max = 100) String eventId
 ) {
