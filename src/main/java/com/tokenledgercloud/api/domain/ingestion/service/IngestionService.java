@@ -21,7 +21,7 @@ import com.tokenledgercloud.api.domain.ingestion.dto.IngestionEventRequest;
 import com.tokenledgercloud.api.domain.ingestion.dto.IngestionEventResponse;
 import com.tokenledgercloud.api.domain.ingestion.dto.RejectedIngestionItemResponse;
 import com.tokenledgercloud.api.domain.usage.dto.UsageLogCreateRequest;
-import com.tokenledgercloud.api.domain.usage.dto.UsageLogResponse;
+import com.tokenledgercloud.api.domain.usage.dto.UsageLogCreateResult;
 import com.tokenledgercloud.api.domain.usage.service.UsageLogService;
 import com.tokenledgercloud.api.global.exception.ApiException;
 import com.tokenledgercloud.api.global.exception.ErrorCode;
@@ -47,8 +47,8 @@ public class IngestionService {
 			request.environment()
 		);
 
-		UsageLogResponse usageLog = usageLogService.create(toUsageLogCreateRequest(auth, request));
-		return new IngestionEventResponse(usageLog.id(), true);
+		UsageLogCreateResult result = usageLogService.createIdempotent(toUsageLogCreateRequest(auth, request));
+		return new IngestionEventResponse(result.log().id(), true, result.duplicate(), request.requestId());
 	}
 
 	@Transactional
@@ -76,7 +76,7 @@ public class IngestionService {
 			}
 
 			try {
-				usageLogService.create(toUsageLogCreateRequest(auth, request.environment(), item));
+				usageLogService.createIdempotent(toUsageLogCreateRequest(auth, request.environment(), item));
 				acceptedCount++;
 			} catch (ApiException exception) {
 				rejectedItems.add(new RejectedIngestionItemResponse(
@@ -128,7 +128,8 @@ public class IngestionService {
 			request.pricingVersion(),
 			sourceType(request.sourceType()),
 			metadataJson(request.metadata()),
-			toUtcLocalDateTime(request.occurredAt())
+			toUtcLocalDateTime(request.occurredAt()),
+			request.eventId()
 		);
 	}
 
@@ -159,7 +160,8 @@ public class IngestionService {
 			item.pricingVersion(),
 			sourceType(item.sourceType()),
 			metadataJson(item.metadata()),
-			toUtcLocalDateTime(item.occurredAt())
+			toUtcLocalDateTime(item.occurredAt()),
+			item.eventId()
 		);
 	}
 

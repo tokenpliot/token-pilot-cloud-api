@@ -30,6 +30,38 @@ public record UsageLogCreateRequest(
 	@NotBlank String pricingVersion,
 	String sourceType,
 	String metadataJson,
-	@NotNull LocalDateTime occurredAt
+	@NotNull LocalDateTime occurredAt,
+	String eventId
 ) {
+
+	/** Legacy shape without {@code eventId}; the idempotency key falls back to {@code requestId}. */
+	public UsageLogCreateRequest(
+		String organizationId,
+		String projectId,
+		String apiKeyId,
+		String environment,
+		String requestId,
+		String provider,
+		String model,
+		Long promptTokens,
+		Long completionTokens,
+		Long reasoningTokens,
+		Long cachedPromptTokens,
+		Long totalTokens,
+		BigDecimal promptCostUsd,
+		BigDecimal completionCostUsd,
+		BigDecimal reasoningCostUsd,
+		BigDecimal cachedPromptCostUsd,
+		BigDecimal totalCostUsd,
+		String pricingPlanId,
+		String pricingVersion,
+		String sourceType,
+		String metadataJson,
+		LocalDateTime occurredAt
+	) {
+		this(organizationId, projectId, apiKeyId, environment, requestId, provider, model, promptTokens,
+			completionTokens, reasoningTokens, cachedPromptTokens, totalTokens, promptCostUsd, completionCostUsd,
+			reasoningCostUsd, cachedPromptCostUsd, totalCostUsd, pricingPlanId, pricingVersion, sourceType,
+			metadataJson, occurredAt, null);
+	}
 }

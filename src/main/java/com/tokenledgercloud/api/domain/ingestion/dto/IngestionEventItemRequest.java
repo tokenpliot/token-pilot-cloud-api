@@ -8,6 +8,7 @@ import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.PositiveOrZero;
+import jakarta.validation.constraints.Size;
 
 public record IngestionEventItemRequest(
 	@NotBlank String requestId,
@@ -27,6 +28,34 @@ public record IngestionEventItemRequest(
 	@NotBlank String pricingVersion,
 	String sourceType,
 	Map<String, Object> metadata,
-	@NotNull OffsetDateTime occurredAt
+	@NotNull OffsetDateTime occurredAt,
+	@Size(max = 100) String eventId
 ) {
+
+	/** Legacy shape without {@code eventId}; the idempotency key falls back to {@code requestId}. */
+	public IngestionEventItemRequest(
+		String requestId,
+		String provider,
+		String model,
+		Long promptTokens,
+		Long completionTokens,
+		Long reasoningTokens,
+		Long cachedPromptTokens,
+		Long totalTokens,
+		BigDecimal promptCostUsd,
+		BigDecimal completionCostUsd,
+		BigDecimal reasoningCostUsd,
+		BigDecimal cachedPromptCostUsd,
+		BigDecimal totalCostUsd,
+		String pricingPlanId,
+		String pricingVersion,
+		String sourceType,
+		Map<String, Object> metadata,
+		OffsetDateTime occurredAt
+	) {
+		this(requestId,
+			provider, model, promptTokens, completionTokens, reasoningTokens, cachedPromptTokens,
+			totalTokens, promptCostUsd, completionCostUsd, reasoningCostUsd, cachedPromptCostUsd, totalCostUsd,
+			pricingPlanId, pricingVersion, sourceType, metadata, occurredAt, null);
+	}
 }
