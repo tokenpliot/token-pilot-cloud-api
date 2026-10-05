@@ -11,7 +11,9 @@ import java.time.LocalDateTime;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.web.util.UrlPathHelper;
 
 import com.tokenledgercloud.api.domain.ingestion.config.IngestionProperties;
 import com.tokenledgercloud.api.global.exception.ErrorCode;
@@ -37,6 +39,8 @@ public class IngestionRequestSizeFilter extends OncePerRequestFilter {
 
 	static final String EVENT_PATH = "/api/ingestion/events";
 	static final String BATCH_PATH = "/api/ingestion/events/batch";
+
+	private static final UrlPathHelper URL_PATH_HELPER = UrlPathHelper.defaultInstance;
 
 	private final IngestionProperties properties;
 
@@ -70,7 +74,9 @@ public class IngestionRequestSizeFilter extends OncePerRequestFilter {
 
 	/** The byte limit for this request's path, or -1 when the path is not an ingestion endpoint. */
 	private int limitFor(HttpServletRequest request) {
-		String path = request.getRequestURI().substring(request.getContextPath().length());
+		// Compare the path the way Spring MVC will match it: percent-decoded, ";param" and "//" removed, dot
+		// segments resolved. The raw request URI would let e.g. /api/ingestion/even%74s skip the limit.
+		String path = StringUtils.cleanPath(URL_PATH_HELPER.getPathWithinApplication(request));
 		if (path.length() > 1 && path.endsWith("/")) {
 			path = path.substring(0, path.length() - 1);
 		}
