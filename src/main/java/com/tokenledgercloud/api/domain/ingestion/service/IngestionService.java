@@ -39,7 +39,7 @@ public class IngestionService {
 	private final Validator validator;
 	private final ObjectMapper objectMapper = new ObjectMapper();
 
-	@Transactional
+	// No surrounding transaction: authentication and each usage-log write run in their own short transactions.
 	public IngestionEventResponse collectEvent(String rawApiKey, IngestionEventRequest request) {
 		AuthenticatedProjectApiKey auth = projectApiKeyAuthenticator.authenticate(
 			rawApiKey,

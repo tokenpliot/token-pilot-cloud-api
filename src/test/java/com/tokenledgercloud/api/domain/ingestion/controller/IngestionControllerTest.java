@@ -211,6 +211,20 @@ class IngestionControllerTest {
 			.andExpect(jsonPath("$.code").value("INGESTION-409"));
 	}
 
+	@Test
+	void unresolvedConcurrentRequestIsReturnedAs503() throws Exception {
+		given(ingestionService.collectEvent(eq("test-api-key"), any()))
+			.willThrow(new ApiException(ErrorCode.INGESTION_RETRY_LATER));
+
+		mockMvc().perform(post("/api/ingestion/events")
+				.header("X-API-Key", "test-api-key")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(EVENT_JSON.formatted("")))
+			.andExpect(status().isServiceUnavailable())
+			.andExpect(jsonPath("$.success").value(false))
+			.andExpect(jsonPath("$.code").value("INGESTION-503"));
+	}
+
 	private static final String EVENT_JSON = """
 		{
 		  "projectKey": "support-copilot",

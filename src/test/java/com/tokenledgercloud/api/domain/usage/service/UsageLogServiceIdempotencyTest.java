@@ -15,7 +15,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -36,12 +35,12 @@ class UsageLogServiceIdempotencyTest {
 	@Mock
 	private UsageLogRepository usageLogRepository;
 
-	@InjectMocks
 	private UsageLogService usageLogService;
 
 	@BeforeEach
 	void stubSave() {
-		org.mockito.Mockito.lenient().when(usageLogRepository.save(any(UsageLog.class))).thenAnswer(invocation -> {
+		usageLogService = new UsageLogService(usageLogRepository, new UsageLogWriter(usageLogRepository));
+		org.mockito.Mockito.lenient().when(usageLogRepository.saveAndFlush(any(UsageLog.class))).thenAnswer(invocation -> {
 			UsageLog log = invocation.getArgument(0);
 			log.setId("usage-new");
 			log.setCreatedAt(LocalDateTime.of(2026, 10, 5, 0, 0));
@@ -108,7 +107,7 @@ class UsageLogServiceIdempotencyTest {
 		assertThat(result.duplicate()).isFalse();
 		assertThat(result.log().id()).isEqualTo("usage-new");
 		ArgumentCaptor<UsageLog> saved = ArgumentCaptor.forClass(UsageLog.class);
-		verify(usageLogRepository).save(saved.capture());
+		verify(usageLogRepository).saveAndFlush(saved.capture());
 		assertThat(saved.getValue().getEventId()).isEqualTo("evt-1");
 		assertThat(saved.getValue().getPayloadFingerprint()).isEqualTo(PayloadFingerprint.of(request));
 	}
@@ -122,7 +121,7 @@ class UsageLogServiceIdempotencyTest {
 
 		assertThat(result.duplicate()).isTrue();
 		assertThat(result.log().id()).isEqualTo("usage-existing");
-		verify(usageLogRepository, never()).save(any());
+		verify(usageLogRepository, never()).saveAndFlush(any());
 	}
 
 	@Test
@@ -143,7 +142,7 @@ class UsageLogServiceIdempotencyTest {
 
 		assertThat(result.duplicate()).isTrue();
 		assertThat(result.log().id()).isEqualTo("usage-existing");
-		verify(usageLogRepository, never()).save(any());
+		verify(usageLogRepository, never()).saveAndFlush(any());
 	}
 
 	@Test
@@ -155,7 +154,7 @@ class UsageLogServiceIdempotencyTest {
 			.isInstanceOf(ApiException.class)
 			.extracting(e -> ((ApiException) e).getErrorCode())
 			.isEqualTo(ErrorCode.IDEMPOTENCY_CONFLICT);
-		verify(usageLogRepository, never()).save(any());
+		verify(usageLogRepository, never()).saveAndFlush(any());
 	}
 
 	@Test
@@ -186,7 +185,29 @@ class UsageLogServiceIdempotencyTest {
 		assertThatThrownBy(() -> usageLogService.createIdempotent(request("req-1", "evt-2", 1200L)))
 			.isInstanceOfSatisfying(ApiException.class,
 				e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.IDEMPOTENCY_CONFLICT));
-		verify(usageLogRepository, never()).save(any());
+		verify(usageLogRepository, never()).saveAndFlush(any());
+	}
+
+	@Test
+	void rowWithTheSameEventIdFoundOnlyByRequestIdIsADuplicateNotAConflict() {
+		// A concurrent request committed between the eventId lookup and the requestId lookup.
+		UsageLogCreateRequest request = request("req-1", "evt-1", 1200L);
+		givenStoredByRequestId(stored(request, PayloadFingerprint.of(request)));
+
+		UsageLogCreateResult result = usageLogService.createIdempotent(request);
+
+		assertThat(result.duplicate()).isTrue();
+		verify(usageLogRepository, never()).saveAndFlush(any());
+	}
+
+	@Test
+	void rowWithTheSameEventIdFoundOnlyByRequestIdButDifferentPayloadIsConflict() {
+		UsageLogCreateRequest original = request("req-1", "evt-1", 1200L);
+		givenStoredByRequestId(stored(original, PayloadFingerprint.of(original)));
+
+		assertThatThrownBy(() -> usageLogService.createIdempotent(request("req-1", "evt-1", 9999L)))
+			.isInstanceOfSatisfying(ApiException.class,
+				e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.IDEMPOTENCY_CONFLICT));
 	}
 
 	@Test
@@ -228,6 +249,6 @@ class UsageLogServiceIdempotencyTest {
 		givenStoredByRequestId(stored(original, PayloadFingerprint.of(original)));
 
 		assertThat(usageLogService.create(request("req-1", null, 9999L)).id()).isEqualTo("usage-existing");
-		verify(usageLogRepository, never()).save(any());
+		verify(usageLogRepository, never()).saveAndFlush(any());
 	}
 }

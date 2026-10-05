@@ -16,6 +16,7 @@ public enum ErrorCode {
 	CONFLICT(HttpStatus.CONFLICT, "COMMON-409", "The request conflicts with current resource state."),
 	INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "COMMON-500", "An unexpected server error occurred."),
 	IDEMPOTENCY_CONFLICT(HttpStatus.CONFLICT, "INGESTION-409", "Idempotency key was already used with a different payload."),
+	INGESTION_RETRY_LATER(HttpStatus.SERVICE_UNAVAILABLE, "INGESTION-503", "Could not resolve a concurrent request. Retry the same request."),
 	DUPLICATE_MEMBER_EMAIL(HttpStatus.CONFLICT, "MEMBER-409", "Email already registered."),
 	MEMBER_NOT_FOUND(HttpStatus.NOT_FOUND, "MEMBER-404", "Member not found."),
 	UNSUPPORTED_AUTHENTICATION(HttpStatus.UNAUTHORIZED, "AUTH-401", "Unsupported authentication type."),
