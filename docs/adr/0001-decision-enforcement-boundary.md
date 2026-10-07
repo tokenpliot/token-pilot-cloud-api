@@ -109,7 +109,7 @@ RESERVED ──▶ IN_FLIGHT ──▶ COMMITTED
 
 - 서버 장애나 판정 불가가 정책 거부로 집계되지 않으므로, 감사·오류·운영 지표를 분리할 수 있다.
 - 기본값이 `OBSERVE`이므로 연결 직후 고객 provider 호출이 Token Pilot 때문에 실패하지 않는다.
-- 클라이언트 SDK(`tokenpliot/tokenpilot`)는 `EnforcementSettings`와 오류 매핑 규칙을 같은 의미로 구현해야 한다. 서버 저장소의 계약 테스트(`DecisionContractTest`, `ControlPlaneOpenApiContractTest`)가 기준이다.
+- 클라이언트 SDK([`tokenpliot/token-pilot-client`](https://github.com/tokenpliot/token-pilot-client))는 `EnforcementSettings`와 오류 매핑 규칙을 같은 의미로 구현해야 한다. 서버 저장소의 계약 테스트(`DecisionContractTest`, `ControlPlaneOpenApiContractTest`)가 기준이다.
 - `ENFORCE`에서 고객이 `FAIL_CLOSED`를 고르면 Control Plane 가용성이 고객 호출 가용성에 영향을 준다. 이 위험은 고객이 명시적으로 선택한 경우에만 생긴다.
 
 ## 부록 A. 기존 ingestion 경로 하위 호환 매핑 (#10)
