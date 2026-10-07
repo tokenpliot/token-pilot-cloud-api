@@ -8,6 +8,8 @@ import java.time.LocalDateTime;
 import java.util.TimeZone;
 import java.util.List;
 
+import jakarta.persistence.EntityManager;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.ResourceLock;
@@ -49,6 +51,7 @@ class ProjectKeyIsolationIntegrationTest {
     @Autowired ProjectApiKeyRepository keys;
     @Autowired UsageLogRepository usage;
     @Autowired PasswordEncoder encoder;
+    @Autowired EntityManager entityManager;
     MockMvc mvc;
     ProjectApiKey keyA;
 
@@ -158,11 +161,14 @@ class ProjectKeyIsolationIntegrationTest {
         TimeZone original = TimeZone.getDefault();
         try {
             TimeZone.setDefault(TimeZone.getTimeZone("Asia/Seoul"));
+            // One minute ago in Seoul local time is still ~9 hours ahead of UTC, so a UTC comparison would accept it.
             keyA.setExpiresAt(LocalDateTime.now().minusMinutes(1));
             keys.saveAndFlush(keyA);
+            // Make the authenticator read expires_at back from the database instead of the cached entity.
+            entityManager.clear();
             rejected(KEY_A, "alpha", "prod", 401);
             assertThat(usage.count()).isZero();
-            assertThat(keyA.getLastUsedAt()).isNull();
+            assertThat(keys.findById(keyA.getId()).orElseThrow().getLastUsedAt()).isNull();
         } finally {
             TimeZone.setDefault(original);
         }
