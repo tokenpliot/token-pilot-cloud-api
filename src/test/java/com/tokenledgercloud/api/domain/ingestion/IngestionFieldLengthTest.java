@@ -148,6 +148,42 @@ class IngestionFieldLengthTest {
 		assertThat(usageLogRepository.count()).isEqualTo(1);
 	}
 
+	@Test
+	void batchRejectsOnlyItemsWhoseAmountsDoNotFitTheColumns() throws Exception {
+		String max = "999999999999.999999";
+		String atMax = amounts("range-at-max", "1", "1", max, "0");
+		String costOverMax = amounts("range-cost-over", "1", "1", "1000000000000", "0");
+		String derivedCostOverMax = amounts("range-sum-over", "1", "1", max, "0.000001");
+		String derivedTokensOverflow = amounts("range-tokens-over", String.valueOf(Long.MAX_VALUE), "1", "0", "0");
+
+		HttpResponse<String> response = post("/api/ingestion/events/batch",
+			batch("prod", atMax, costOverMax, derivedCostOverMax, derivedTokensOverflow));
+
+		assertThat(response.statusCode()).isEqualTo(200);
+		JsonNode items = JSON.readTree(response.body()).path("data").path("items");
+		assertThat(items.get(0).path("status").asText()).isEqualTo("CREATED");
+		for (int i = 1; i <= 3; i++) {
+			assertThat(items.get(i).path("status").asText()).isEqualTo("REJECTED");
+			assertThat(items.get(i).path("code").asText()).isEqualTo("COMMON-400");
+			assertThat(items.get(i).path("retryable").asBoolean()).isFalse();
+		}
+		assertThat(items.get(1).path("message").asText()).contains("promptCostUsd");
+		assertThat(items.get(2).path("message").asText()).contains("totalCostUsd");
+		assertThat(items.get(3).path("message").asText()).contains("totalTokens");
+		assertThat(usageLogRepository.findAll()).singleElement()
+			.satisfies(row -> assertThat(row.getTotalCostUsd()).isEqualByComparingTo(max));
+	}
+
+	/** Item without totals, so the server derives totalTokens and totalCostUsd from the parts. */
+	private static String amounts(String requestId, String promptTokens, String completionTokens, String promptCost,
+		String completionCost) {
+		return """
+			{ "requestId": "%s", "provider": "openai", "model": "gpt-4o-mini",
+			  "promptTokens": %s, "completionTokens": %s, "promptCostUsd": %s, "completionCostUsd": %s,
+			  "pricingVersion": "2026-05-01", "occurredAt": "2026-05-06T10:00:00Z" }
+			""".formatted(requestId, promptTokens, completionTokens, promptCost, completionCost);
+	}
+
 	private static String field(String name, String value) {
 		return ", \"" + name + "\": \"" + value + "\"";
 	}

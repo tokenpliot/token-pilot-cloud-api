@@ -28,20 +28,6 @@ public class UsageLogWriter {
 
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public UsageLog insertNew(UsageLogCreateRequest request, String eventId, String fingerprint) {
-		Long totalTokens = request.totalTokens() != null
-			? request.totalTokens()
-			: request.promptTokens()
-				+ request.completionTokens()
-				+ safe(request.reasoningTokens())
-				+ safe(request.cachedPromptTokens());
-
-		var totalCostUsd = request.totalCostUsd() != null
-			? request.totalCostUsd()
-			: request.promptCostUsd()
-				.add(request.completionCostUsd())
-				.add(safe(request.reasoningCostUsd()))
-				.add(safe(request.cachedPromptCostUsd()));
-
 		UsageLog usageLog = UsageLog.builder()
 			.organizationId(request.organizationId())
 			.projectId(request.projectId())
@@ -56,12 +42,12 @@ public class UsageLogWriter {
 			.completionTokens(request.completionTokens())
 			.reasoningTokens(safe(request.reasoningTokens()))
 			.cachedPromptTokens(safe(request.cachedPromptTokens()))
-			.totalTokens(totalTokens)
+			.totalTokens(request.resolvedTotalTokens())
 			.promptCostUsd(request.promptCostUsd())
 			.completionCostUsd(request.completionCostUsd())
 			.reasoningCostUsd(safe(request.reasoningCostUsd()))
 			.cachedPromptCostUsd(safe(request.cachedPromptCostUsd()))
-			.totalCostUsd(totalCostUsd)
+			.totalCostUsd(request.resolvedTotalCostUsd())
 			.pricingPlanId(request.pricingPlanId())
 			.pricingVersion(request.pricingVersion())
 			.sourceType(request.sourceType())

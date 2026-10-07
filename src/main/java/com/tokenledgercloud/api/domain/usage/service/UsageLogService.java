@@ -1,5 +1,6 @@
 package com.tokenledgercloud.api.domain.usage.service;
 
+import java.math.BigDecimal;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -36,6 +37,7 @@ public class UsageLogService {
 
 	private static final String UNIQUE_SQL_STATE = "23505";
 	private static final int MYSQL_DUPLICATE_ENTRY = 1062;
+	private static final BigDecimal MAX_USD = new BigDecimal(UsageLogCreateRequest.MAX_USD);
 
 	private final UsageLogRepository usageLogRepository;
 	private final UsageLogWriter usageLogWriter;
@@ -73,6 +75,7 @@ public class UsageLogService {
 	}
 
 	private UsageLogCreateResult doCreateOrGet(UsageLogCreateRequest request, boolean enforcePayload) {
+		validateTotals(request);
 		String fingerprint = fingerprint(request);
 		String eventId = blankToNull(request.eventId());
 		boolean hasRequestId = request.requestId() != null && !request.requestId().isBlank();
@@ -199,6 +202,21 @@ public class UsageLogService {
 			return false;
 		}
 		return stored.getPayloadFingerprint() == null || stored.getPayloadFingerprint().equals(fingerprint);
+	}
+
+	/**
+	 * A derived total can overflow the columns even when every part is in range. Rejected as invalid input so a
+	 * batch marks only this item REJECTED instead of failing the whole request on a database error.
+	 */
+	private void validateTotals(UsageLogCreateRequest request) {
+		try {
+			request.resolvedTotalTokens();
+		} catch (ArithmeticException exception) {
+			throw new ApiException(ErrorCode.INVALID_INPUT, "totalTokens is out of range.");
+		}
+		if (request.resolvedTotalCostUsd().compareTo(MAX_USD) > 0) {
+			throw new ApiException(ErrorCode.INVALID_INPUT, "totalCostUsd is out of range.");
+		}
 	}
 
 	private String fingerprint(UsageLogCreateRequest request) {

@@ -49,15 +49,13 @@ public final class PayloadFingerprint {
 		long completion = zero(request.completionTokens());
 		long reasoning = zero(request.reasoningTokens());
 		long cached = zero(request.cachedPromptTokens());
-		long totalTokens = request.totalTokens() != null ? request.totalTokens() : prompt + completion + reasoning + cached;
+		long totalTokens = request.resolvedTotalTokens();
 
 		BigDecimal promptCost = zero(request.promptCostUsd());
 		BigDecimal completionCost = zero(request.completionCostUsd());
 		BigDecimal reasoningCost = zero(request.reasoningCostUsd());
 		BigDecimal cachedCost = zero(request.cachedPromptCostUsd());
-		BigDecimal totalCost = request.totalCostUsd() != null
-			? request.totalCostUsd()
-			: promptCost.add(completionCost).add(reasoningCost).add(cachedCost);
+		BigDecimal totalCost = request.resolvedTotalCostUsd();
 
 		StringBuilder canonical = new StringBuilder(VERSION).append('\n');
 		field(canonical, "provider", request.provider());

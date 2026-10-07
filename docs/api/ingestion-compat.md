@@ -180,6 +180,7 @@
 | metadata 금지 키 | **기본(비엄격) 모드**: `400`이 아니다. 금지 키만 metadata에서 제거하고 나머지로 정상 저장한다(배치 항목도 `REJECTED` 없이 `CREATED`). 경고 로그에는 종류(`FORBIDDEN_KEY`)와 개수만 남기고 키 이름·값은 남기지 않는다. **엄격 모드**: `400`, 메시지는 `metadata contains a forbidden key`이며 키 이름과 값을 담지 않는다(배치에서는 해당 **항목만** `REJECTED`). 키 이름만 검사하며(대소문자 무시, 중첩·리스트 안의 맵 포함) 값은 보지 않는다. 어떤 모드에서도 금지 키와 그 값은 DB·로그·응답에 남지 않는다. | `token-pilot.ingestion.forbidden-metadata-keys` = `prompt, system_prompt, completion, messages, content, response` |
 | metadata 형식(항목 16개 초과, 키 형식 `^[a-z][a-z0-9_.-]{0,63}$` 위반, 문자열이 아닌 값, 256자 초과) | 기본은 경고 로그만 남기고 통과(키·값은 로그에 없음, 금지 키를 제거한 나머지로 판단). 엄격 모드에서는 `400`(최대 16개·키 패턴·값 256자 이하 계약 규칙 적용) | `token-pilot.ingestion.strict-metadata` = `false` |
 | 요청 크기 | 단건 16KB, 배치 1MB 초과 시 `413`(`INGESTION-413`). 인증·JSON 파싱 전에 거부 | `token-pilot.ingestion.max-event-bytes` = `16384`, `max-batch-bytes` = `1048576` |
+| 금액·토큰 범위 | 비용 필드는 `0` 이상 `999999999999.999999` 이하(`decimal(18,6)`). 합계를 서버가 계산할 때 비용 합계가 이 값을 넘거나 토큰 합계가 `long`을 넘으면 `400`(배치는 해당 항목만 `REJECTED`). DB 오류로 배치 전체가 `500`이 되지 않는다 | - |
 | 검증 실패 응답 | 입력값을 되돌려주지 않는다(`errors[].rejectedValue`는 `null`, 키는 유지) | - |
 | 원문 prompt/completion | 저장하지 않는다. 최상위의 알 수 없는 필드는 무시된다([한계](#7-알려진-한계)) | - |
 
@@ -241,7 +242,7 @@
 | `acceptedCount`는 중복 포함 | 기존 SDK 호환을 위한 것이다. 새로 저장된 수는 `createdCount`를 본다. |
 | 이전 행은 payload 비교 불가 | fingerprint가 없는 기존 행과 같은 키로 보내면 비교 없이 기존 이벤트를 반환한다. |
 | 프레임워크 요청 오류가 모두 `500` | 깨진 JSON, 빈 본문, 지원하지 않는 `Content-Type`, 허용되지 않은 HTTP 메서드(예: `GET`)가 `400`/`415`/`405`가 아니라 `500` `COMMON-500`으로 응답된다. 전역 `GlobalExceptionHandler`의 `Exception` 처리가 프레임워크 예외까지 가로채기 때문이며 이번 이슈 이전부터의 동작이다. 단건·배치 모두 같고 **수정하지 않았다.** 내장 서블릿 환경의 MockMvc에서 확인했다. |
-| MySQL 미검증 | 실제 락·데드락 거동과 Spring의 예외 번역, REPEATABLE READ 스냅샷, V5 마이그레이션의 실제 적용, 유니크 위반 판별(에러 1062), `json` 컬럼 저장 방식, 상태값·`projectKey`의 대소문자 비교(collation), 운영 연결 풀은 확인하지 못했다. |
+| MySQL 일부만 검증 | MySQL 8.0.46(Docker)에서 확인: V1~V5 적용, 같은 이벤트 16건 동시 전송 시 1행만 저장(유니크 위반 1062 → 재조회 → `duplicate`), 재전송 `duplicate`·payload 변경 `409`, 배치 항목별 범위 거부, 금지 키 제거, `json` 컬럼 utf8mb4 저장. 확인하지 못함: 실제 데드락의 예외 번역, 상태값·`projectKey`의 대소문자 비교(collation), 운영 연결 풀. |
 
 ## 8. 배포·클라이언트 메모
 

@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.Map;
 
+import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -12,6 +13,7 @@ import jakarta.validation.constraints.Size;
 
 import com.tokenledgercloud.api.domain.ingestion.validation.SupportedSchemaVersion;
 import com.tokenledgercloud.api.domain.ingestion.validation.ValidIngestionMetadata;
+import com.tokenledgercloud.api.domain.usage.dto.UsageLogCreateRequest;
 
 public record IngestionEventRequest(
 	@NotBlank String projectKey,
@@ -24,11 +26,11 @@ public record IngestionEventRequest(
 	@PositiveOrZero Long reasoningTokens,
 	@PositiveOrZero Long cachedPromptTokens,
 	@PositiveOrZero Long totalTokens,
-	@DecimalMin("0.000000") BigDecimal promptCostUsd,
-	@DecimalMin("0.000000") BigDecimal completionCostUsd,
-	@DecimalMin("0.000000") BigDecimal reasoningCostUsd,
-	@DecimalMin("0.000000") BigDecimal cachedPromptCostUsd,
-	@DecimalMin("0.000000") BigDecimal totalCostUsd,
+	@DecimalMin("0.000000") @DecimalMax(UsageLogCreateRequest.MAX_USD) BigDecimal promptCostUsd,
+	@DecimalMin("0.000000") @DecimalMax(UsageLogCreateRequest.MAX_USD) BigDecimal completionCostUsd,
+	@DecimalMin("0.000000") @DecimalMax(UsageLogCreateRequest.MAX_USD) BigDecimal reasoningCostUsd,
+	@DecimalMin("0.000000") @DecimalMax(UsageLogCreateRequest.MAX_USD) BigDecimal cachedPromptCostUsd,
+	@DecimalMin("0.000000") @DecimalMax(UsageLogCreateRequest.MAX_USD) BigDecimal totalCostUsd,
 	@Size(max = 36) String pricingPlanId,
 	@NotBlank @Size(max = 50) String pricingVersion,
 	@Size(max = 30) String sourceType,
