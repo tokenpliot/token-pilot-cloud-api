@@ -11,7 +11,8 @@ import lombok.*;
 @Table(
 	name = "usage_events",
 	uniqueConstraints = {
-		@UniqueConstraint(name = "uk_usage_events_project_env_request", columnNames = {"project_id", "environment", "request_id"})
+		@UniqueConstraint(name = "uk_usage_events_project_env_request", columnNames = {"project_id", "environment", "request_id"}),
+		@UniqueConstraint(name = "uk_usage_events_project_env_event", columnNames = {"project_id", "environment", "event_id"})
 	},
 	indexes = {
 		@Index(name = "idx_usage_events_project_time", columnList = "project_id, environment, occurred_at"),
@@ -43,6 +44,12 @@ public class UsageLog {
 
 	@Column(name = "request_id", length = 100)
 	private String requestId;
+
+	@Column(name = "event_id", length = 100)
+	private String eventId;
+
+	@Column(name = "payload_fingerprint", length = 64, columnDefinition = "char(64)")
+	private String payloadFingerprint;
 
 	@Column(nullable = false, length = 50)
 	private String provider;

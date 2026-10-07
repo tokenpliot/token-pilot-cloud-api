@@ -1,5 +1,5 @@
 -- REVIEW DRAFT ONLY. Outside classpath:db/migration; never copy into production without rehearsal.
--- Target MySQL >= 8.0.16, InnoDB. V5 is provisional. Existing V1-V4 remain unchanged.
+-- Target MySQL >= 8.0.16, InnoDB. V6 is provisional (V5 is #10 ingestion idempotency). Existing V1-V5 remain unchanged.
 -- Each DDL commits separately. Run preflight.sql, inspect collation/drift and take a restorable backup first.
 -- Expansion only: nullable/default fields permit old binaries. Application writers are a separate rollout.
 

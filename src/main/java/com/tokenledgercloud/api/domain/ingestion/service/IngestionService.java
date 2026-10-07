@@ -10,18 +10,20 @@ import java.util.Map;
 import java.util.Set;
 
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tokenledgercloud.api.domain.ingestion.dto.IngestionBatchRequest;
+import com.tokenledgercloud.api.domain.ingestion.dto.IngestionBatchItemResponse;
 import com.tokenledgercloud.api.domain.ingestion.dto.IngestionBatchResponse;
 import com.tokenledgercloud.api.domain.ingestion.dto.IngestionEventItemRequest;
 import com.tokenledgercloud.api.domain.ingestion.dto.IngestionEventRequest;
 import com.tokenledgercloud.api.domain.ingestion.dto.IngestionEventResponse;
+import com.tokenledgercloud.api.domain.ingestion.dto.IngestionItemStatus;
 import com.tokenledgercloud.api.domain.ingestion.dto.RejectedIngestionItemResponse;
+import com.tokenledgercloud.api.domain.ingestion.validation.IngestionMetadataPolicy;
 import com.tokenledgercloud.api.domain.usage.dto.UsageLogCreateRequest;
-import com.tokenledgercloud.api.domain.usage.dto.UsageLogResponse;
+import com.tokenledgercloud.api.domain.usage.dto.UsageLogCreateResult;
 import com.tokenledgercloud.api.domain.usage.service.UsageLogService;
 import com.tokenledgercloud.api.global.exception.ApiException;
 import com.tokenledgercloud.api.global.exception.ErrorCode;
@@ -37,9 +39,10 @@ public class IngestionService {
 	private final ProjectApiKeyAuthenticator projectApiKeyAuthenticator;
 	private final UsageLogService usageLogService;
 	private final Validator validator;
+	private final IngestionMetadataPolicy metadataPolicy;
 	private final ObjectMapper objectMapper = new ObjectMapper();
 
-	@Transactional
+	// No surrounding transaction: authentication and each usage-log write run in their own short transactions.
 	public IngestionEventResponse collectEvent(String rawApiKey, IngestionEventRequest request) {
 		AuthenticatedProjectApiKey auth = projectApiKeyAuthenticator.authenticate(
 			rawApiKey,
@@ -47,11 +50,15 @@ public class IngestionService {
 			request.environment()
 		);
 
-		UsageLogResponse usageLog = usageLogService.create(toUsageLogCreateRequest(auth, request));
-		return new IngestionEventResponse(usageLog.id(), true);
+		UsageLogCreateResult result = usageLogService.createIdempotent(toUsageLogCreateRequest(auth, request));
+		return new IngestionEventResponse(result.log().id(), true, result.duplicate(), request.requestId());
 	}
 
-	@Transactional
+	/**
+	 * Each item is processed independently, in request order, in its own short transactions (none spans the
+	 * batch), so one item's failure never rolls back or blocks another and items hold no locks across each other.
+	 * An authentication failure rejects the whole request before anything is written.
+	 */
 	public IngestionBatchResponse collectBatch(String rawApiKey, IngestionBatchRequest request) {
 		AuthenticatedProjectApiKey auth = projectApiKeyAuthenticator.authenticate(
 			rawApiKey,
@@ -59,36 +66,65 @@ public class IngestionService {
 			request.environment()
 		);
 
-		int acceptedCount = 0;
+		List<IngestionBatchItemResponse> items = new ArrayList<>();
 		List<RejectedIngestionItemResponse> rejectedItems = new ArrayList<>();
+		int createdCount = 0;
+		int duplicateCount = 0;
 
 		for (int i = 0; i < request.items().size(); i++) {
 			IngestionEventItemRequest item = request.items().get(i);
+			String requestId = item == null ? null : item.requestId();
+
 			List<String> violations = validateItem(item);
 			if (!violations.isEmpty()) {
-				rejectedItems.add(new RejectedIngestionItemResponse(
-					i,
-					item == null ? null : item.requestId(),
-					ErrorCode.INVALID_INPUT.getCode(),
-					String.join(", ", violations)
-				));
+				reject(items, rejectedItems, i, requestId, ErrorCode.INVALID_INPUT, String.join(", ", violations));
 				continue;
 			}
 
 			try {
-				usageLogService.create(toUsageLogCreateRequest(auth, request.environment(), item));
-				acceptedCount++;
-			} catch (ApiException exception) {
-				rejectedItems.add(new RejectedIngestionItemResponse(
+				UsageLogCreateResult result = usageLogService.createIdempotent(
+					toUsageLogCreateRequest(auth, request.environment(), item));
+				if (result.duplicate()) {
+					duplicateCount++;
+				} else {
+					createdCount++;
+				}
+				items.add(new IngestionBatchItemResponse(
 					i,
-					item.requestId(),
-					exception.getErrorCode().getCode(),
-					exception.getMessage()
+					requestId,
+					result.duplicate() ? IngestionItemStatus.DUPLICATE : IngestionItemStatus.CREATED,
+					result.log().id(),
+					null,
+					null,
+					false
 				));
+			} catch (ApiException exception) {
+				reject(items, rejectedItems, i, requestId, exception.getErrorCode(), exception.getMessage());
 			}
 		}
 
-		return new IngestionBatchResponse(acceptedCount, rejectedItems.size(), rejectedItems);
+		return new IngestionBatchResponse(
+			createdCount + duplicateCount,
+			rejectedItems.size(),
+			rejectedItems,
+			createdCount,
+			duplicateCount,
+			items
+		);
+	}
+
+	private void reject(
+		List<IngestionBatchItemResponse> items,
+		List<RejectedIngestionItemResponse> rejectedItems,
+		int index,
+		String requestId,
+		ErrorCode errorCode,
+		String message
+	) {
+		boolean retryable = errorCode.isRetryable();
+		rejectedItems.add(new RejectedIngestionItemResponse(index, requestId, errorCode.getCode(), message, retryable));
+		items.add(new IngestionBatchItemResponse(
+			index, requestId, IngestionItemStatus.REJECTED, null, errorCode.getCode(), message, retryable));
 	}
 
 	private List<String> validateItem(IngestionEventItemRequest item) {
@@ -128,7 +164,8 @@ public class IngestionService {
 			request.pricingVersion(),
 			sourceType(request.sourceType()),
 			metadataJson(request.metadata()),
-			toUtcLocalDateTime(request.occurredAt())
+			toUtcLocalDateTime(request.occurredAt()),
+			request.eventId()
 		);
 	}
 
@@ -159,16 +196,22 @@ public class IngestionService {
 			item.pricingVersion(),
 			sourceType(item.sourceType()),
 			metadataJson(item.metadata()),
-			toUtcLocalDateTime(item.occurredAt())
+			toUtcLocalDateTime(item.occurredAt()),
+			item.eventId()
 		);
 	}
 
+	/**
+	 * Forbidden keys are dropped here, whatever the validation mode, so they never reach the database, and the
+	 * payload fingerprint (computed from this JSON) is taken without them.
+	 */
 	private String metadataJson(Map<String, Object> metadata) {
-		if (metadata == null || metadata.isEmpty()) {
+		Map<String, Object> cleaned = metadataPolicy.sanitize(metadata).metadata();
+		if (cleaned == null || cleaned.isEmpty()) {
 			return null;
 		}
 		try {
-			return objectMapper.writeValueAsString(metadata);
+			return objectMapper.writeValueAsString(cleaned);
 		} catch (JsonProcessingException exception) {
 			throw new ApiException(ErrorCode.INVALID_INPUT, "metadata must be JSON serializable.");
 		}

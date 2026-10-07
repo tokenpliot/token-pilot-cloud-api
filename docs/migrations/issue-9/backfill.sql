@@ -1,4 +1,4 @@
--- MANUAL REVIEW DRAFT, run after V5 on a clone first. Not a Flyway automatic data migration.
+-- MANUAL REVIEW DRAFT, run after V6 on a clone first. Not a Flyway automatic data migration.
 -- Set @issue9_run_id, @issue9_cutoff_utc, @issue9_lower_id (exclusive), @issue9_upper_id (inclusive)
 -- to an approved run manifest in this session. UUID ordering is NOT chronological.
 -- Unset variables cause no writes; there are intentionally no example production defaults here.

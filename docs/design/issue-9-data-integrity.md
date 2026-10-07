@@ -112,10 +112,10 @@
 
 ## 5. Flyway 초안·백필·롤백
 
-[SQL 디렉터리](../migrations/issue-9/)는 Flyway 기본 classpath 밖이다. V5 번호는 후보이며 병합 시 마지막 버전 다음으로 다시 정한다. V1~V4 checksum은 변경하지 않는다.
+[SQL 디렉터리](../migrations/issue-9/)는 Flyway 기본 classpath 밖이다. V5는 #10의 `V5__ingestion_idempotency.sql`(`event_id`, `payload_fingerprint`)이 사용하므로 이 초안은 V6 후보이며, 승격 시 마지막 버전 다음으로 다시 정한다. 기존 마이그레이션 checksum은 변경하지 않는다.
 
 1. **Preflight**: [preflight.sql](../migrations/issue-9/preflight.sql) 실행 결과 저장. 실제 MySQL `SELECT VERSION()`, SHOW CREATE TABLE, flyway_schema_history, charset/collation 대조. 복제 DB에 백업 복원까지 시험. orphan/tenant 불일치/가격 중첩/예산 중복은 소유자 확인 전 배포 중단.
-2. **Expand**: [V5 초안](../migrations/issue-9/V5__accounting_snapshots_draft.sql). 기존 금액·응답을 건드리지 않고 nullable/default 컬럼과 새 테이블 추가. MySQL 8.0.16+ CHECK 지원을 전제로 함. 실제 버전/DDL 시간/잠금은 미검증. 운영 규모 복제 DB에서 소요 시간 및 잠금을 측정하고 쓰기 중지 창을 정한다.
+2. **Expand**: [V6 초안](../migrations/issue-9/V6__accounting_snapshots_draft.sql). 기존 금액·응답을 건드리지 않고 nullable/default 컬럼과 새 테이블 추가. MySQL 8.0.16+ CHECK 지원을 전제로 함. 실제 버전/DDL 시간/잠금은 미검증. 운영 규모 복제 DB에서 소요 시간 및 잠금을 측정하고 쓰기 중지 창을 정한다.
 3. **Writer 배포**: 구버전은 LEGACY_UNVERIFIED defaults로 계속 쓰며 신규 adapter만 accounting_values를 생성. snapshot과 usage/회계/감사 기록은 한 트랜잭션. 오류 시 전체 롤백. 가격 미상은 NULL로 수집하고 후속 reconciliation 대상으로 남긴다.
 4. **Backfill**: [backfill.sql](../migrations/issue-9/backfill.sql)은 승인된 PK 구간만 `created_at <= cutoff`로 처리하고 동일 구간 재실행 가능. 이전 USD 값은 sdk_reported 증거로만 복사. 무조건 ACTUAL/PRICED로 승격하지 않음. 별도 증빙으로 토큰 의미/가격 단위/귀속/실제 여부를 입증한 행만 verifier가 snapshot과 ACTUAL revision을 추가. 실패 행은 QUARANTINED, 재처리 사유·실행 ID 보존.
 5. **검산**: 구/신 전체 건수·tenant별 건수·USD 합계·날짜별 합계 비교. 원본 v0 합계가 변하지 않아야 함. 신규 actual 합계/추정 합계/unpriced·unknown 건수/격리 건수는 따로 보고하고 증빙 있는 차이만 허용. UUID PK는 시간순이 아니므로 최초 대상 PK 목록 또는 cutoff+키셋을 고정하고 watermark 기록. 구 writer가 뒤늦게 쓴 행은 재스캔한다.

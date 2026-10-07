@@ -15,6 +15,9 @@ public enum ErrorCode {
 	NOT_FOUND(HttpStatus.NOT_FOUND, "COMMON-404", "The requested resource was not found."),
 	CONFLICT(HttpStatus.CONFLICT, "COMMON-409", "The request conflicts with current resource state."),
 	INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "COMMON-500", "An unexpected server error occurred."),
+	IDEMPOTENCY_CONFLICT(HttpStatus.CONFLICT, "INGESTION-409", "Idempotency key was already used with a different payload."),
+	PAYLOAD_TOO_LARGE(HttpStatus.CONTENT_TOO_LARGE, "INGESTION-413", "Request body is too large."),
+	INGESTION_RETRY_LATER(HttpStatus.SERVICE_UNAVAILABLE, "INGESTION-503", "Could not resolve a concurrent request. Retry the same request."),
 	DUPLICATE_MEMBER_EMAIL(HttpStatus.CONFLICT, "MEMBER-409", "Email already registered."),
 	MEMBER_NOT_FOUND(HttpStatus.NOT_FOUND, "MEMBER-404", "Member not found."),
 	UNSUPPORTED_AUTHENTICATION(HttpStatus.UNAUTHORIZED, "AUTH-401", "Unsupported authentication type."),
@@ -30,4 +33,10 @@ public enum ErrorCode {
 	private final HttpStatus status;
 	private final String code;
 	private final String message;
+
+	/** Whether the same request may succeed if sent again (ADR 0001 section 4: 408, 429 and 5xx). */
+	public boolean isRetryable() {
+		int value = status.value();
+		return value == 408 || value == 429 || status.is5xxServerError();
+	}
 }

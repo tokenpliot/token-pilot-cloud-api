@@ -16,6 +16,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.FilterChainProxy;
+import org.springframework.test.context.transaction.AfterTransaction;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.transaction.annotation.Transactional;
@@ -61,6 +62,12 @@ class ProjectKeyIsolationIntegrationTest {
         project("project-d", "org-b", "alpha");
         keyA = key("key-a", "org-a", "project-a", KEY_A, "prod");
         key("key-b", "org-a", "project-b", KEY_B, "prod");
+    }
+
+    /** Usage rows are written by UsageLogWriter in REQUIRES_NEW, so the test rollback does not remove them. */
+    @AfterTransaction
+    void deleteCommittedUsage() {
+        usage.deleteAll();
     }
 
     @Test

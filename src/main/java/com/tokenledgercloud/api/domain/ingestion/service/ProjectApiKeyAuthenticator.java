@@ -18,6 +18,28 @@ import com.tokenledgercloud.api.global.exception.ErrorCode;
 
 import lombok.RequiredArgsConstructor;
 
+/**
+ * Authenticates a project API key for the ingestion endpoints. Checks run in this order and the first failure
+ * ends the request (every failure is non-retryable and the messages never contain the key):
+ *
+ * <ol>
+ * <li>key missing or blank: 401</li>
+ * <li>an ACTIVE key whose prefix candidates and BCrypt hash match: otherwise 401 "Invalid project API key."
+ *     Unknown, wrong, revoked and disabled keys all look the same on purpose. Any status other than ACTIVE
+ *     counts as revoked; there is no separate revoked-at or reason.</li>
+ * <li>expiry: {@code expiresAt} before the server's local {@code now()}: 401 "expired". A null expiry never expires.</li>
+ * <li>environment: if the key has one it must equal the request's exactly (case-sensitive): otherwise 403.
+ *     A key whose environment is null or blank is valid for every environment, and the request's environment
+ *     is then used as sent.</li>
+ * <li>project: looked up by (key's organization, projectKey): missing 404; not the key's project 403;
+ *     not ACTIVE 403</li>
+ * </ol>
+ * {@code lastUsedAt} is updated only when every check passes.
+ *
+ * <p>Not verified here: scope or permissions (the key table has no scope; any ACTIVE key may call both ingestion
+ * endpoints), revocation time or reason, request rate, and the time zone of {@code expiresAt}.
+ * See docs/api/ingestion-api-key-verification.md.
+ */
 @Service
 @RequiredArgsConstructor
 public class ProjectApiKeyAuthenticator {
