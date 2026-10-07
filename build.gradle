@@ -33,8 +33,8 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-thymeleaf'
 	implementation 'org.springframework.ai:spring-ai-starter-model-openai'
 
-	// Flyway
-	implementation 'org.flywaydb:flyway-core'
+	// Flyway: Boot 4 runs migrations only through its starter (flyway-core alone is not auto-configured)
+	implementation 'org.springframework.boot:spring-boot-starter-flyway'
 	implementation 'org.flywaydb:flyway-mysql'
 
 	// OpenAPI
