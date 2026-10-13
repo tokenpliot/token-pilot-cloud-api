@@ -22,6 +22,20 @@ public final class ReconciliationClassifier {
                                                CallStatus callStatus,
                                                SettlementState settlementState,
                                                AccountingAmount latestActual) {
+        // 금액 객체에서 가격 상태만 꺼내서 아래 메서드에 맡긴다. 규칙은 한 곳에만 둔다.
+        return classifyByPricing(accountingStatus, callStatus, settlementState,
+                latestActual == null ? null : latestActual.pricingStatus());
+    }
+
+    /**
+     * 조회 쿼리처럼 금액 객체 없이 "최신 실제 값의 가격 상태"만 아는 경우에 쓴다.
+     *
+     * @param latestActualPricingStatus 최신 ACTUAL 값의 가격 상태. ACTUAL 값이 아직 없으면 null
+     */
+    public static ReconciliationState classifyByPricing(AccountingStatus accountingStatus,
+                                                        CallStatus callStatus,
+                                                        SettlementState settlementState,
+                                                        AccountingAmount.PricingStatus latestActualPricingStatus) {
         // 입력 상태값이 null이면 잘못된 호출이므로 즉시 실패시킨다.
         Objects.requireNonNull(accountingStatus, "accountingStatus");
         Objects.requireNonNull(callStatus, "callStatus");
@@ -44,8 +58,7 @@ public final class ReconciliationClassifier {
             return ReconciliationState.RECONCILIATION_REQUIRED;
         }
         // 실제 사용량은 있는데 금액이 비어 있으면 UNPRICED. 0달러로 취급하면 안 된다.
-        if (latestActual != null
-                && latestActual.pricingStatus() == AccountingAmount.PricingStatus.UNPRICED) {
+        if (latestActualPricingStatus == AccountingAmount.PricingStatus.UNPRICED) {
             return ReconciliationState.UNPRICED;
         }
         // 위 어디에도 해당하지 않으면 아직 대기 중이거나 정상이다.
