@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.tokenledgercloud.api.domain.accounting.observe.dto.IngestionLagResponse;
+import com.tokenledgercloud.api.domain.accounting.observe.dto.ReconciliationSummaryResponse;
 import com.tokenledgercloud.api.domain.accounting.observe.dto.UnattributedCostResponse;
 import com.tokenledgercloud.api.domain.accounting.observe.dto.UnpricedSummaryResponse;
 import com.tokenledgercloud.api.global.response.ApiResponse;
@@ -65,5 +66,17 @@ public class ObserveLedgerController {
         LedgerPeriod range = LedgerPeriod.resolve(period, LocalDate.now());
         return ResponseEntity.ok(ApiResponse.success("가격 누락 조회 성공",
                 queryService.getUnpriced(DEFAULT_ORGANIZATION_ID, projectId, environment, range)));
+    }
+
+    // GET /api/observe/ledger/reconciliation?projectId=...&environment=...&period=month
+    // 미정산 이벤트를 UNPRICED / RECONCILIATION_REQUIRED로 나눠서 센다.
+    @GetMapping("/reconciliation")
+    public ResponseEntity<ApiResponse<ReconciliationSummaryResponse>> reconciliation(
+            @RequestParam String projectId,
+            @RequestParam(required = false) String environment,
+            @RequestParam(defaultValue = "month") String period) {
+        LedgerPeriod range = LedgerPeriod.resolve(period, LocalDate.now());
+        return ResponseEntity.ok(ApiResponse.success("정산 확인 현황 조회 성공",
+                queryService.getReconciliation(DEFAULT_ORGANIZATION_ID, projectId, environment, range)));
     }
 }

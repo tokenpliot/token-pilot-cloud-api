@@ -10,7 +10,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.tokenledgercloud.api.domain.accounting.AccountingAmount;
 import com.tokenledgercloud.api.domain.accounting.AccountingStatus;
+import com.tokenledgercloud.api.domain.accounting.CallStatus;
+import com.tokenledgercloud.api.domain.accounting.ReconciliationClassifier;
+import com.tokenledgercloud.api.domain.accounting.ReconciliationState;
+import com.tokenledgercloud.api.domain.accounting.SettlementState;
 import com.tokenledgercloud.api.domain.accounting.observe.dto.IngestionLagResponse;
+import com.tokenledgercloud.api.domain.accounting.observe.dto.ReconciliationSummaryResponse;
 import com.tokenledgercloud.api.domain.accounting.observe.dto.UnattributedCostResponse;
 import com.tokenledgercloud.api.domain.accounting.observe.dto.UnpricedSummaryResponse;
 import com.tokenledgercloud.api.domain.project.repository.ProjectRepository;
@@ -90,6 +95,31 @@ public class ObserveLedgerQueryService {
         // 총 건수는 항목별 건수의 합이다.
         long total = items.stream().mapToLong(UnpricedSummaryResponse.Item::eventCount).sum();
         return new UnpricedSummaryResponse(projectId, env, period.from(), period.to(), total, items);
+    }
+
+    /** 정산 확인 현황: 미정산 이벤트를 분류 규칙에 따라 UNPRICED / RECONCILIATION_REQUIRED로 나눠 센다. */
+    @Transactional(readOnly = true)
+    public ReconciliationSummaryResponse getReconciliation(String organizationId, String projectId,
+                                                           String environment, LedgerPeriod period) {
+        requireProject(organizationId, projectId);
+        String env = blankToNull(environment);
+        long unpriced = 0L;
+        long required = 0L;
+        // 미정산 이벤트를 하나씩 분류기에 넣어 상태별로 센다.
+        for (var row : queryRepository.findUnsettledRows(organizationId, projectId, env,
+                period.from(), period.to(), AccountingAmount.Kind.ACTUAL)) {
+            ReconciliationState state = ReconciliationClassifier.classifyByPricing(
+                    AccountingStatus.valueOf(row.getAccountingStatus()),
+                    CallStatus.valueOf(row.getCallStatus()),
+                    SettlementState.valueOf(row.getSettlementState()),
+                    row.getLatestActualPricingStatus());
+            if (state == ReconciliationState.UNPRICED) {
+                unpriced++;
+            } else if (state == ReconciliationState.RECONCILIATION_REQUIRED) {
+                required++;
+            }
+        }
+        return new ReconciliationSummaryResponse(projectId, env, period.from(), period.to(), unpriced, required);
     }
 
     // 프로젝트가 이 조직 소유가 아니면 NOT_FOUND. (존재 여부도 알려주지 않는다)
