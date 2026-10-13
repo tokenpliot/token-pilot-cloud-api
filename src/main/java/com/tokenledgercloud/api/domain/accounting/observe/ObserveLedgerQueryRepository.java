@@ -25,6 +25,15 @@ public interface ObserveLedgerQueryRepository extends Repository<UsageLog, Strin
         Long getUnsettledCount();           // 아직 정산되지 않은 이벤트 수
     }
 
+    /** 정산 확인 분류에 필요한 이벤트 한 줄. */
+    interface ReconciliationRow {
+        String getAccountingStatus();   // 회계 검증 상태
+        String getCallStatus();         // 호출 결과 상태
+        String getSettlementState();    // 정산 상태
+        // 최신 실제(ACTUAL) 값의 가격 상태. 실제 값이 아직 없으면 null이다.
+        AccountingAmount.PricingStatus getLatestActualPricingStatus();
+    }
+
     /** 가격 누락 집계의 한 줄 (공급자/모델별). */
     interface UnpricedRow {
         String getProvider();   // 공급자
@@ -123,4 +132,34 @@ public interface ObserveLedgerQueryRepository extends Repository<UsageLog, Strin
                                    @Param("to") LocalDateTime to,
                                    @Param("kind") AccountingAmount.Kind kind,
                                    @Param("pricingStatus") AccountingAmount.PricingStatus pricingStatus);
+
+    // 아직 정산되지 않은 원장 이벤트를 상태 컬럼과 "최신 실제 값의 가격 상태"와 함께 읽는다.
+    // 스칼라 서브쿼리가 이벤트별로 가장 큰 revision의 가격 상태 하나만 골라준다.
+    // 분류 규칙은 ReconciliationClassifier에만 두기 위해, 여기서는 규칙을 판단하지 않고 값만 읽는다.
+    @Query("""
+        select u.accountingStatus as accountingStatus,
+               u.callStatus as callStatus,
+               u.settlementState as settlementState,
+               (select v.pricingStatus
+                from UsageAccountingValue v
+                where v.usageEventId = u.id
+                  and v.valueKind = :kind
+                  and v.revision = (select max(v2.revision) from UsageAccountingValue v2
+                                    where v2.usageEventId = v.usageEventId and v2.valueKind = v.valueKind)
+               ) as latestActualPricingStatus
+        from UsageLog u
+        where u.organizationId = :organizationId
+          and u.projectId = :projectId
+          and (:environment is null or u.environment = :environment)
+          and u.occurredAt >= :from
+          and u.occurredAt < :to
+          and u.accountingStatus <> 'LEGACY_UNVERIFIED'
+          and u.settlementState = 'UNSETTLED'
+        """)
+    List<ReconciliationRow> findUnsettledRows(@Param("organizationId") String organizationId,
+                                              @Param("projectId") String projectId,
+                                              @Param("environment") String environment,
+                                              @Param("from") LocalDateTime from,
+                                              @Param("to") LocalDateTime to,
+                                              @Param("kind") AccountingAmount.Kind kind);
 }
