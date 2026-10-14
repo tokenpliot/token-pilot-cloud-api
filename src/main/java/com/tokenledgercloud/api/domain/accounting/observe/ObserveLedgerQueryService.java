@@ -3,6 +3,8 @@ package com.tokenledgercloud.api.domain.accounting.observe;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.YearMonth;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 
 import org.springframework.stereotype.Service;
@@ -15,10 +17,12 @@ import com.tokenledgercloud.api.domain.accounting.ReconciliationClassifier;
 import com.tokenledgercloud.api.domain.accounting.ReconciliationState;
 import com.tokenledgercloud.api.domain.accounting.SettlementState;
 import com.tokenledgercloud.api.domain.accounting.observe.dto.IngestionLagResponse;
+import com.tokenledgercloud.api.domain.accounting.observe.dto.LedgerSpendSummaryResponse;
 import com.tokenledgercloud.api.domain.accounting.observe.dto.ReconciliationSummaryResponse;
 import com.tokenledgercloud.api.domain.accounting.observe.dto.UnattributedCostResponse;
 import com.tokenledgercloud.api.domain.accounting.observe.dto.UnpricedSummaryResponse;
 import com.tokenledgercloud.api.domain.project.repository.ProjectRepository;
+import com.tokenledgercloud.api.domain.usage.repository.UsageLogRepository;
 import com.tokenledgercloud.api.global.exception.ApiException;
 import com.tokenledgercloud.api.global.exception.ErrorCode;
 
@@ -38,6 +42,10 @@ public class ObserveLedgerQueryService {
     private final ObserveLedgerQueryRepository queryRepository;
     // 프로젝트가 해당 조직 소유인지 확인하는 저장소.
     private final ProjectRepository projectRepository;
+    // 기존 방식으로 기록된 이벤트의 합계를 읽는 저장소.
+    private final UsageLogRepository usageLogRepository;
+    // 새 원장의 확정 지출과 반영되지 않은 건수를 읽는 저장소.
+    private final LedgerSpendRepository ledgerSpendRepository;
 
     /** 수집 지연: 마지막으로 받은 시각과 미정산 건수를 돌려준다. now는 지난 시간 계산 기준이다. */
     @Transactional(readOnly = true)
@@ -95,6 +103,39 @@ public class ObserveLedgerQueryService {
         // 총 건수는 항목별 건수의 합이다.
         long total = items.stream().mapToLong(UnpricedSummaryResponse.Item::eventCount).sum();
         return new UnpricedSummaryResponse(projectId, env, period.from(), period.to(), total, items);
+    }
+
+    /**
+     * 월 지출 요약: 기존 합계와 새 원장의 확정 금액을 따로 보여주고, 지출에 반영되지 않은 이벤트 수를 알려준다.
+     * 기존(v0) 예산 응답은 그대로 두고 이 응답으로 원장 반영 숫자를 제공한다. (설계 문서 6장)
+     *
+     * @param month yyyy-MM 형식. 월 경계는 UTC 기준이다.
+     */
+    @Transactional(readOnly = true)
+    public LedgerSpendSummaryResponse getSpendSummary(String organizationId, String projectId, String environment,
+                                                      String month) {
+        requireProject(organizationId, projectId);
+        String env = blankToNull(environment);
+        // 월 문자열을 해석한다. 형식이 틀리면 잘못된 기간으로 거절한다.
+        YearMonth yearMonth;
+        try {
+            yearMonth = YearMonth.parse(month);
+        } catch (DateTimeParseException | NullPointerException exception) {
+            throw new ApiException(ErrorCode.INVALID_PERIOD);
+        }
+        // 이번 달 1일 00:00 이상, 다음 달 1일 00:00 미만.
+        LocalDateTime from = yearMonth.atDay(1).atStartOfDay();
+        LocalDateTime to = yearMonth.plusMonths(1).atDay(1).atStartOfDay();
+        // 기존 합계와 새 원장의 확정 금액은 서로 겹치지 않는 행이라 더해도 이중 계산이 없다.
+        BigDecimal legacy = usageLogRepository.sumTotalCostUsd(projectId, env, from, to);
+        BigDecimal ledger = ledgerSpendRepository.sumConfirmedSpend(organizationId, projectId, env, from, to,
+                AccountingAmount.Kind.ACTUAL, AccountingAmount.PricingStatus.PRICED);
+        BigDecimal legacySpent = legacy == null ? BigDecimal.ZERO : legacy;
+        BigDecimal ledgerSpent = ledger == null ? BigDecimal.ZERO : ledger;
+        // 지출에 반영되지 않은 이벤트 수. 0원으로 숨기지 않고 따로 알려준다.
+        long unreflected = ledgerSpendRepository.countUnreflected(organizationId, projectId, env, from, to);
+        return new LedgerSpendSummaryResponse(projectId, env, yearMonth.toString(),
+                legacySpent, ledgerSpent, legacySpent.add(ledgerSpent), unreflected, "USD");
     }
 
     /** 정산 확인 현황: 미정산 이벤트를 분류 규칙에 따라 UNPRICED / RECONCILIATION_REQUIRED로 나눠 센다. */

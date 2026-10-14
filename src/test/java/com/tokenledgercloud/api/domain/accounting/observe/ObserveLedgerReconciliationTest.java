@@ -138,4 +138,16 @@ class ObserveLedgerReconciliationTest {
         assertThat(response.unpricedEventCount()).isZero();
         assertThat(response.reconciliationRequiredEventCount()).isZero();
     }
+
+    @Test
+    void quarantinedEventStillAppearsEvenWhenRecordedAsSettled() {
+        // writer는 실제 사용량에 가격이 확정되면 SETTLED로 기록한다. 격리된 이벤트가 이 상태여도 보여야 한다.
+        actual(event("qs", "QUARANTINED", "SUCCEEDED", "SETTLED"), 1, priced("3.000000"));
+
+        var response = service.getReconciliation(ORG, projectId, null, PERIOD);
+
+        // 지출에서도 빠지는 이벤트라서, 여기에도 안 나타나면 어디서도 볼 수 없다.
+        assertThat(response.reconciliationRequiredEventCount()).isEqualTo(1);
+        assertThat(response.unpricedEventCount()).isZero();
+    }
 }
