@@ -45,13 +45,14 @@ public final class ReconciliationClassifier {
         if (accountingStatus == AccountingStatus.LEGACY_UNVERIFIED) {
             return ReconciliationState.NONE;
         }
-        // 이미 정산이 끝난 행은 더 확인할 것이 없다.
-        if (settlementState == SettlementState.SETTLED) {
-            return ReconciliationState.NONE;
-        }
-        // 격리된 행은 사람이 대조해야 한다.
+        // 격리된 행은 정산 상태와 상관없이 사람이 대조해야 한다.
+        // (정산 완료로 기록되었더라도 귀속이 불확실하면 지출에도 넣지 않으므로, 여기서 빼면 어디에도 나타나지 않는다)
         if (accountingStatus == AccountingStatus.QUARANTINED) {
             return ReconciliationState.RECONCILIATION_REQUIRED;
+        }
+        // 격리가 아닌데 정산이 끝난 행은 더 확인할 것이 없다.
+        if (settlementState == SettlementState.SETTLED) {
+            return ReconciliationState.NONE;
         }
         // 사용량을 알 수 없는 호출도 사람이 대조해야 한다.
         if (callStatus == CallStatus.USAGE_UNKNOWN) {

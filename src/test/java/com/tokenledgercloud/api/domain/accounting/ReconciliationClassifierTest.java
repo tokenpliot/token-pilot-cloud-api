@@ -31,10 +31,18 @@ class ReconciliationClassifierTest {
 
     @Test
     void settledRowsNeedNothing() {
-        // 정산 완료 행은 격리 상태여도 더 확인할 것이 없다.
-        assertThat(ReconciliationClassifier.classify(AccountingStatus.QUARANTINED,
+        // 검증이 끝나고 정산까지 끝난 행은 더 확인할 것이 없다.
+        assertThat(ReconciliationClassifier.classify(AccountingStatus.VERIFIED,
                 CallStatus.SUCCEEDED, SettlementState.SETTLED, PRICED_ACTUAL))
                 .isEqualTo(ReconciliationState.NONE);
+    }
+
+    @Test
+    void quarantinedRowsStayFlaggedEvenWhenSettled() {
+        // 정산 완료로 기록되었어도 격리된 행은 대조 대상이어야 한다. (지출에서도 빠지므로 안 보이면 안 된다)
+        assertThat(ReconciliationClassifier.classify(AccountingStatus.QUARANTINED,
+                CallStatus.SUCCEEDED, SettlementState.SETTLED, PRICED_ACTUAL))
+                .isEqualTo(ReconciliationState.RECONCILIATION_REQUIRED);
     }
 
     @Test
