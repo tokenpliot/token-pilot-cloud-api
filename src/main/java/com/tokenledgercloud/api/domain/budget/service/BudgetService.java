@@ -8,8 +8,6 @@ import java.time.YearMonth;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.tokenledgercloud.api.domain.accounting.AccountingAmount;
-import com.tokenledgercloud.api.domain.accounting.observe.LedgerSpendRepository;
 import com.tokenledgercloud.api.domain.budget.dto.BudgetSummaryResponse;
 import com.tokenledgercloud.api.domain.budget.dto.BudgetUpsertRequest;
 import com.tokenledgercloud.api.domain.budget.dto.BudgetUpsertResponse;
@@ -32,8 +30,6 @@ public class BudgetService {
 	private final MonthlyBudgetSettingRepository budgetRepository;
 	private final UsageLogRepository usageLogRepository;
 	private final BudgetCalculator budgetCalculator;
-	// [이슈 #11] 새 원장(usage_accounting_values)의 확정 지출과 미정산 건수를 읽는 저장소.
-	private final LedgerSpendRepository ledgerSpendRepository;
 
 	@Transactional
 	public BudgetUpsertResponse upsert(BudgetUpsertRequest request) {
@@ -76,17 +72,7 @@ public class BudgetService {
 		LocalDateTime from = startDate.atStartOfDay();
 		LocalDateTime to = endDate.atStartOfDay();
 
-		// [이슈 #11] 지출 = 기존 행의 합계 + 새 원장의 확정(ACTUAL, PRICED) 금액 합계. 두 집합은 겹치지 않는다.
-		BigDecimal legacySpentUsd = usageLogRepository.sumTotalCostUsd(projectId, environment, from, to);
-		BigDecimal ledgerSpentUsd = ledgerSpendRepository.sumConfirmedSpend(
-			DEFAULT_ORGANIZATION_ID, projectId, environment, from, to,
-			AccountingAmount.Kind.ACTUAL, AccountingAmount.PricingStatus.PRICED
-		);
-		BigDecimal spentUsd = nullToZero(legacySpentUsd).add(nullToZero(ledgerSpentUsd));
-		// [이슈 #11] 가격 미상이나 격리 등으로 아직 지출에 못 넣은 이벤트 수. 0원으로 숨기지 않고 따로 알려준다.
-		long unsettledEventCount = ledgerSpendRepository.countUnsettled(
-			DEFAULT_ORGANIZATION_ID, projectId, environment, from, to
-		);
+		BigDecimal spentUsd = usageLogRepository.sumTotalCostUsd(projectId, environment, from, to);
 
 		var calculation = budgetCalculator.calculate(
 			budget.getLimitUsd(),
@@ -101,8 +87,7 @@ public class BudgetService {
 			calculation.spentUsd(),
 			calculation.remainingUsd(),
 			calculation.usagePercent(),
-			budgetCalculator.toThresholds(budget),
-			unsettledEventCount
+			budgetCalculator.toThresholds(budget)
 		);
 	}
 
@@ -118,11 +103,6 @@ public class BudgetService {
 			projectId,
 			environment
 		);
-	}
-
-	// [이슈 #11] 합계 쿼리 결과가 비어 있으면(null) 0으로 바꾼다.
-	private BigDecimal nullToZero(BigDecimal value) {
-		return value == null ? BigDecimal.ZERO : value;
 	}
 
 	private YearMonth parseMonth(String month) {
