@@ -11,12 +11,12 @@ import java.math.BigDecimal;
  * @param unreflectedEventCount   지출에 반영되지 않은 이벤트 수. 0이 아니면 실제 지출이 totalSpentUsd보다 클 수 있다.
  */
 public record LedgerSpendSummaryResponse(
-        String projectId,
-        String environment,
-        String month,
-        BigDecimal legacySpentUsd,
-        BigDecimal ledgerConfirmedSpentUsd,
-        BigDecimal totalSpentUsd,
-        long unreflectedEventCount,
-        String currency) {
+		String projectId,
+		String environment,
+		String month,
+		BigDecimal legacySpentUsd,
+		BigDecimal ledgerConfirmedSpentUsd,
+		BigDecimal totalSpentUsd,
+		long unreflectedEventCount,
+		String currency) {
 }

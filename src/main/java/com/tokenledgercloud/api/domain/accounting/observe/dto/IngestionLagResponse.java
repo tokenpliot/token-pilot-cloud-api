@@ -12,13 +12,13 @@ import java.time.LocalDateTime;
  * @param secondsSinceLastReceived  마지막 수신 후 지난 초. 클수록 수집이 멈춰 있다는 뜻 (이벤트가 없으면 null)
  */
 public record IngestionLagResponse(
-        String projectId,
-        String environment,
-        LocalDateTime from,
-        LocalDateTime to,
-        long eventCount,
-        long unsettledCount,
-        LocalDateTime lastReceivedAt,
-        LocalDateTime lastOccurredAt,
-        Long secondsSinceLastReceived) {
+		String projectId,
+		String environment,
+		LocalDateTime from,
+		LocalDateTime to,
+		long eventCount,
+		long unsettledCount,
+		LocalDateTime lastReceivedAt,
+		LocalDateTime lastOccurredAt,
+		Long secondsSinceLastReceived) {
 }
