@@ -17,6 +17,9 @@ import com.tokenledgercloud.api.domain.usage.repository.projection.ProjectTopMod
 import com.tokenledgercloud.api.domain.usage.repository.projection.ProjectUsageRankingProjection;
 public interface UsageLogRepository extends JpaRepository<UsageLog, String> {
 
+	// [이슈 #11] 기존(v0) 집계는 LEGACY_UNVERIFIED 행만 읽는다. 새 원장 행이 0달러로 섞이는 것을 막는다.
+	// 멱등성 조회(findBy...RequestId/EventId)는 모든 상태의 행을 찾아야 하므로 필터를 걸지 않는다.
+
 	Optional<UsageLog> findByProjectIdAndEnvironmentAndRequestId(String projectId, String environment, String requestId);
 
 	Optional<UsageLog> findByProjectIdAndEnvironmentAndEventId(String projectId, String environment, String eventId);
@@ -29,6 +32,7 @@ public interface UsageLogRepository extends JpaRepository<UsageLog, String> {
 	where (:projectId is null or u.projectId = :projectId)
 	  and u.occurredAt >= :from
 	  and u.occurredAt < :to
+	  and u.accountingStatus = 'LEGACY_UNVERIFIED'
     """)
 	KpiProjection getKpi(String projectId, LocalDateTime from, LocalDateTime to);
 
@@ -40,6 +44,7 @@ public interface UsageLogRepository extends JpaRepository<UsageLog, String> {
 		where (:projectId is null or u.projectId = :projectId)
 		  and u.occurredAt >= :from
 		  and u.occurredAt < :to
+		  and u.accountingStatus = 'LEGACY_UNVERIFIED'
 		group by u.model
 		order by sum(u.totalCostUsd) desc
 	""")
@@ -56,6 +61,7 @@ public interface UsageLogRepository extends JpaRepository<UsageLog, String> {
 		from UsageLog u
 		where u.occurredAt >= :from
 		  and u.occurredAt < :to
+		  and u.accountingStatus = 'LEGACY_UNVERIFIED'
 		group by u.projectId
 		order by sum(u.totalCostUsd) desc
 	""")
@@ -77,6 +83,7 @@ public interface UsageLogRepository extends JpaRepository<UsageLog, String> {
 		and (:environment is null or u.environment = :environment)
 		and u.occurred_at >= :from
 		and u.occurred_at < :to
+		and u.accounting_status = 'LEGACY_UNVERIFIED'
 		group by date_format(u.occurred_at, '%Y-%m-%d')
 		order by bucket asc
 	""", nativeQuery = true)
@@ -93,6 +100,7 @@ public interface UsageLogRepository extends JpaRepository<UsageLog, String> {
 		and (:environment is null or u.environment = :environment)
 		and u.occurredAt >= :from
 		and u.occurredAt < :to
+		and u.accountingStatus = 'LEGACY_UNVERIFIED'
 
 	""")
 
@@ -113,6 +121,7 @@ public interface UsageLogRepository extends JpaRepository<UsageLog, String> {
 		and (:provider is null or u.provider = :provider)
 		and (:model is null or u.model = :model)
 		and (:cursorOccurredAt is null or u.occurredAt < :cursorOccurredAt)
+		and u.accountingStatus = 'LEGACY_UNVERIFIED'
 		order by u.occurredAt desc
 	""")
 	List<UsageLog> findRecentUsageEvents(
@@ -139,6 +148,7 @@ public interface UsageLogRepository extends JpaRepository<UsageLog, String> {
 			where u.occurred_at >= :from
 			and u.occurred_at < :to
 			and (:environment is null or u.environment = :environment)
+			and u.accounting_status = 'LEGACY_UNVERIFIED'
 			group by u.project_id, u.model
 		) ranked
 		where ranked.rn = 1
@@ -159,6 +169,7 @@ public interface UsageLogRepository extends JpaRepository<UsageLog, String> {
 		and (:environment is null or u.environment = :environment)
 		and u.occurredAt >= :from
 		and u.occurredAt < :to
+		and u.accountingStatus = 'LEGACY_UNVERIFIED'
 		group by u.projectId
 		order by sum(u.totalCostUsd) desc, max(u.occurredAt) desc
 	""")

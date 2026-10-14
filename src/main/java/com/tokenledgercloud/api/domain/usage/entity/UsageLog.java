@@ -4,6 +4,10 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
+import com.tokenledgercloud.api.domain.accounting.AccountingStatus;
+import com.tokenledgercloud.api.domain.accounting.CallStatus;
+import com.tokenledgercloud.api.domain.accounting.SettlementState;
+
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -99,6 +103,19 @@ public class UsageLog {
 	@Column(name = "metadata_json", columnDefinition = "json")
 	private String metadataJson;
 
+	// [이슈 #11] 회계 검증 상태. V6의 accounting_status 컬럼과 같다.
+	// 기존 수집 경로는 값을 지정하지 않으므로 아래 prePersist에서 LEGACY_UNVERIFIED로 채운다.
+	@Column(name = "accounting_status", nullable = false, length = 30)
+	private String accountingStatus;
+
+	// [이슈 #11] LLM 호출 결과 상태. V6의 call_status 컬럼과 같다. 기존 수집 경로는 LEGACY_UNKNOWN으로 저장한다.
+	@Column(name = "call_status", nullable = false, length = 30)
+	private String callStatus;
+
+	// [이슈 #11] 정산 상태. V6의 settlement_state 컬럼과 같다. 기본값은 UNSETTLED이다.
+	@Column(name = "settlement_state", nullable = false, length = 20)
+	private String settlementState;
+
 	@Column(name = "occurred_at", nullable = false)
 	private LocalDateTime occurredAt;
 
@@ -129,6 +146,18 @@ public class UsageLog {
 				.add(completionCostUsd)
 				.add(reasoningCostUsd)
 				.add(cachedPromptCostUsd);
+		}
+		// [이슈 #11] 상태를 지정하지 않은 기존 수집 경로는 LEGACY_UNVERIFIED로 저장한다. (DB 기본값과 같은 값)
+		if (accountingStatus == null || accountingStatus.isBlank()) {
+			accountingStatus = AccountingStatus.LEGACY_UNVERIFIED.name();
+		}
+		// [이슈 #11] 호출 결과를 모르는 기존 수집 경로는 LEGACY_UNKNOWN으로 저장한다. (DB 기본값과 같은 값)
+		if (callStatus == null || callStatus.isBlank()) {
+			callStatus = CallStatus.LEGACY_UNKNOWN.name();
+		}
+		// [이슈 #11] 정산 상태를 지정하지 않으면 UNSETTLED로 저장한다. (DB 기본값과 같은 값)
+		if (settlementState == null || settlementState.isBlank()) {
+			settlementState = SettlementState.UNSETTLED.name();
 		}
 		if (sourceType == null || sourceType.isBlank()) {
 			sourceType = "sdk";
