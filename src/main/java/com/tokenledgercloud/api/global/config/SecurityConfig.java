@@ -3,6 +3,7 @@ package com.tokenledgercloud.api.global.config;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -10,6 +11,7 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
@@ -57,6 +59,11 @@ public class SecurityConfig {
 				.anyRequest().permitAll() //개발용
 
 			)
+			// [이슈 #11] /api/ 경로의 미인증 요청은 OAuth 로그인 페이지로 보내지 않고 401을 돌려준다.
+			.exceptionHandling(exceptions -> exceptions.defaultAuthenticationEntryPointFor(
+				new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED),
+				request -> request.getRequestURI().startsWith("/api/")
+			))
 			.oauth2Login(oauth2 -> oauth2
 				.userInfoEndpoint(userInfo -> userInfo.userService(customOAuth2UserService))
 				.successHandler(oAuth2SuccessHandler)
