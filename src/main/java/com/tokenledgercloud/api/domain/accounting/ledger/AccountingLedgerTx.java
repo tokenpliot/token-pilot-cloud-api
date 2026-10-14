@@ -51,6 +51,9 @@ public class AccountingLedgerTx {
                 .requestId(command.requestId())
                 .eventId(command.eventId())
                 .payloadFingerprint(command.payloadFingerprint())
+                // 새 계약의 버전과 토큰 의미를 그대로 저장한다. (기존 값 legacy-v0, LEGACY_UNKNOWN으로 남지 않게 한다)
+                .schemaVersion(command.schemaVersion())
+                .tokenSemantics(command.tokenSemantics().name())
                 .provider(command.provider())
                 .model(command.model())
                 .promptTokens(command.promptTokens())
@@ -70,6 +73,9 @@ public class AccountingLedgerTx {
                 .accountingStatus(AccountingStatus.PENDING.name())
                 .callStatus(command.callStatus().name())
                 .settlementState(settlementOf(command).name())
+                // 기록 주체도 UNKNOWN이 아니라 호출자가 넘긴 값으로 남긴다.
+                .actorType(command.actorType())
+                .actorId(command.actorId())
                 .build();
         // 저장하고 바로 flush해서, 중복 키 오류가 이 트랜잭션 안에서 터지게 한다.
         UsageLog saved = usageLogRepository.saveAndFlush(event);
@@ -91,6 +97,15 @@ public class AccountingLedgerTx {
     @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
     public Optional<UsageLog> findEvent(String projectId, String environment, String eventId) {
         return usageLogRepository.findByProjectIdAndEnvironmentAndEventId(projectId, environment, eventId);
+    }
+
+    /**
+     * 같은 (프로젝트, 환경, requestId)의 이벤트를 새 트랜잭션에서 읽는다.
+     * 다른 eventId가 같은 requestId를 쓰는 충돌을 알아내려는 용도다.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
+    public Optional<UsageLog> findEventByRequestId(String projectId, String environment, String requestId) {
+        return usageLogRepository.findByProjectIdAndEnvironmentAndRequestId(projectId, environment, requestId);
     }
 
     // 정산 상태 규칙: 실제 사용량에 가격까지 확정되면 SETTLED, 그 외(추정, 가격 미상, 사용량 미상)는 UNSETTLED.

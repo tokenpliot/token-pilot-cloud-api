@@ -5,12 +5,14 @@ import java.util.Objects;
 
 import com.tokenledgercloud.api.domain.accounting.AccountingAmount;
 import com.tokenledgercloud.api.domain.accounting.CallStatus;
+import com.tokenledgercloud.api.domain.accounting.TokenSemantics;
 
 /**
  * 원장 writer에 넘기는 입력 값. 이벤트 한 건과, 그 이벤트에 기록할 금액(추정/실제) 한 개를 담는다.
  * HTTP 계약(/v2)이 확정되기 전이므로 아직 어떤 컨트롤러와도 연결되어 있지 않다.
  *
- * @param amount 기록할 금액. 사용량을 알 수 없는 호출(USAGE_UNKNOWN)이면 반드시 null이다.
+ * @param amount 기록할 금액. SUCCEEDED면 필수, USAGE_UNKNOWN이면 반드시 null이다.
+ *               PROVIDER_FAILED와 BLOCKED_BY_CLIENT는 선택이다. (공급자 실패만으로 사용량 0이라고 확정하지 않는다)
  */
 public record AccountingLedgerCommand(
         String organizationId,      // 조직 id
@@ -20,6 +22,8 @@ public record AccountingLedgerCommand(
         String requestId,           // 요청 id (없을 수 있음)
         String eventId,             // 멱등성 키. 같은 값을 여러 번 보내도 한 번만 반영된다.
         String payloadFingerprint,  // 본문 지문(SHA-256 hex 64자). 같은 eventId에 다른 본문이 오는지 판별한다.
+        String schemaVersion,       // 이벤트가 따른 계약 버전 (예: observe-v1). 최대 50자.
+        TokenSemantics tokenSemantics, // 토큰 항목의 포함 의미. LEGACY_UNKNOWN은 쓸 수 없다.
         String provider,            // LLM 공급자
         String model,               // 모델 이름
         long promptTokens,          // 프롬프트 토큰
@@ -52,6 +56,16 @@ public record AccountingLedgerCommand(
         if (payloadFingerprint == null || payloadFingerprint.length() != 64) {
             throw new IllegalArgumentException("payloadFingerprint must be 64 characters");
         }
+        // 계약 버전은 DB 컬럼(varchar(50))에 맞는 비어 있지 않은 문자열이어야 한다.
+        requireText(schemaVersion, "schemaVersion");
+        if (schemaVersion.length() > 50) {
+            throw new IllegalArgumentException("schemaVersion must be at most 50 characters");
+        }
+        // 토큰 의미는 필수이고, 기존 행 전용 값은 쓸 수 없다.
+        Objects.requireNonNull(tokenSemantics, "tokenSemantics");
+        if (tokenSemantics == TokenSemantics.LEGACY_UNKNOWN) {
+            throw new IllegalArgumentException("LEGACY_UNKNOWN token semantics is reserved for pre-ledger rows");
+        }
         // 시각과 호출 결과는 필수다.
         Objects.requireNonNull(occurredAt, "occurredAt");
         Objects.requireNonNull(callStatus, "callStatus");
@@ -68,9 +82,10 @@ public record AccountingLedgerCommand(
         if (callStatus == CallStatus.USAGE_UNKNOWN && amount != null) {
             throw new IllegalArgumentException("USAGE_UNKNOWN must not carry an amount");
         }
-        // 사용량을 아는 호출은 금액(PRICED 또는 UNPRICED)이 있어야 한다.
-        if (callStatus != CallStatus.USAGE_UNKNOWN && amount == null) {
-            throw new IllegalArgumentException("amount is required unless callStatus is USAGE_UNKNOWN");
+        // 호출이 성공했다면 금액(PRICED 또는 UNPRICED)이 있어야 한다.
+        // 공급자 실패와 클라이언트 차단은 금액 없이도 기록할 수 있다.
+        if (callStatus == CallStatus.SUCCEEDED && amount == null) {
+            throw new IllegalArgumentException("amount is required when callStatus is SUCCEEDED");
         }
     }
 
