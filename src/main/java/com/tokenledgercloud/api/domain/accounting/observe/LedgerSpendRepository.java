@@ -43,8 +43,9 @@ public interface LedgerSpendRepository extends Repository<UsageLog, String> {
                                  @Param("kind") AccountingAmount.Kind kind,
                                  @Param("pricingStatus") AccountingAmount.PricingStatus pricingStatus);
 
-    // 예산에 아직 반영되지 않은 이벤트 수: 원장 이벤트 중 정산이 끝나지 않은(UNSETTLED) 것.
-    // 가격 미상, 격리, 사용량 미상, 추정만 있는 이벤트가 여기에 들어간다.
+    // 지출에 반영되지 않은 이벤트 수: 원장 이벤트 중 정산이 끝나지 않았거나(UNSETTLED) 격리된(QUARANTINED) 것.
+    // 가격 미상, 사용량 미상, 추정만 있는 이벤트와, 정산 완료로 기록되었어도 지출에서 빠지는 격리 이벤트가 들어간다.
+    // 위의 sumConfirmedSpend가 빼는 이벤트가 전부 여기에 세어져야 어디에도 안 보이는 이벤트가 없다.
     @Query("""
         select count(u)
         from UsageLog u
@@ -54,9 +55,9 @@ public interface LedgerSpendRepository extends Repository<UsageLog, String> {
           and u.occurredAt >= :from
           and u.occurredAt < :to
           and u.accountingStatus <> 'LEGACY_UNVERIFIED'
-          and u.settlementState = 'UNSETTLED'
+          and (u.settlementState = 'UNSETTLED' or u.accountingStatus = 'QUARANTINED')
         """)
-    long countUnsettled(@Param("organizationId") String organizationId,
+    long countUnreflected(@Param("organizationId") String organizationId,
                         @Param("projectId") String projectId,
                         @Param("environment") String environment,
                         @Param("from") LocalDateTime from,

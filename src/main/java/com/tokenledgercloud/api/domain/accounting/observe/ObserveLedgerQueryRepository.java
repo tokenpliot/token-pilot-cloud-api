@@ -106,6 +106,7 @@ public interface ObserveLedgerQueryRepository extends Repository<UsageLog, Strin
                                     @Param("pricingStatus") AccountingAmount.PricingStatus pricingStatus);
 
     // 최신 실제(ACTUAL) 개정본이 가격 미상(UNPRICED)인 이벤트를 공급자/모델별로 센다.
+    // /reconciliation의 UNPRICED 건수와 같은 기준이 되도록 분류기와 같은 조건(기존 행, 격리, 정산 완료, 사용량 미상 제외)을 건다.
     @Query("""
         select u.provider as provider,
                u.model as model,
@@ -122,6 +123,10 @@ public interface ObserveLedgerQueryRepository extends Repository<UsageLog, Strin
           and v.pricingStatus = :pricingStatus
           and v.revision = (select max(v2.revision) from UsageAccountingValue v2
                             where v2.usageEventId = v.usageEventId and v2.valueKind = v.valueKind)
+          and u.accountingStatus <> 'LEGACY_UNVERIFIED'
+          and u.accountingStatus <> 'QUARANTINED'
+          and u.settlementState = 'UNSETTLED'
+          and u.callStatus <> 'USAGE_UNKNOWN'
         group by u.provider, u.model
         order by count(u) desc
         """)
@@ -133,7 +138,7 @@ public interface ObserveLedgerQueryRepository extends Repository<UsageLog, Strin
                                    @Param("kind") AccountingAmount.Kind kind,
                                    @Param("pricingStatus") AccountingAmount.PricingStatus pricingStatus);
 
-    // 아직 정산되지 않은 원장 이벤트를 상태 컬럼과 "최신 실제 값의 가격 상태"와 함께 읽는다.
+    // 아직 정산되지 않았거나 격리된 원장 이벤트를 상태 컬럼과 "최신 실제 값의 가격 상태"와 함께 읽는다.
     // 스칼라 서브쿼리가 이벤트별로 가장 큰 revision의 가격 상태 하나만 골라준다.
     // 분류 규칙은 ReconciliationClassifier에만 두기 위해, 여기서는 규칙을 판단하지 않고 값만 읽는다.
     @Query("""
@@ -154,7 +159,7 @@ public interface ObserveLedgerQueryRepository extends Repository<UsageLog, Strin
           and u.occurredAt >= :from
           and u.occurredAt < :to
           and u.accountingStatus <> 'LEGACY_UNVERIFIED'
-          and u.settlementState = 'UNSETTLED'
+          and (u.settlementState = 'UNSETTLED' or u.accountingStatus = 'QUARANTINED')
         """)
     List<ReconciliationRow> findUnsettledRows(@Param("organizationId") String organizationId,
                                               @Param("projectId") String projectId,
