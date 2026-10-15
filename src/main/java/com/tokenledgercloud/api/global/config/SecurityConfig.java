@@ -3,6 +3,7 @@ package com.tokenledgercloud.api.global.config;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -10,6 +11,7 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
@@ -47,6 +49,8 @@ public class SecurityConfig {
 				.requestMatchers(HttpMethod.POST, "/api/members").permitAll()
 				.requestMatchers(HttpMethod.POST, "/internal/usage-logs").permitAll()
 				.requestMatchers(HttpMethod.POST, "/api/ingestion/**").permitAll()
+				// [이슈 #11] Observe 수집 v2도 기존 수집 API처럼 프로젝트 API 키로 서비스에서 인증한다.
+				.requestMatchers(HttpMethod.POST, "/api/v2/observe/events").permitAll()
 				.requestMatchers("/api/dashboard/**").permitAll()
 				.requestMatchers("/dashboard").permitAll()
 				.requestMatchers("/login", "/oauth2/**", "/error").permitAll()
@@ -57,6 +61,11 @@ public class SecurityConfig {
 				.anyRequest().permitAll() //개발용
 
 			)
+			// [이슈 #11] /api/ 경로의 미인증 요청은 OAuth 로그인 페이지로 보내지 않고 401을 돌려준다.
+			.exceptionHandling(exceptions -> exceptions.defaultAuthenticationEntryPointFor(
+				new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED),
+				request -> request.getRequestURI().startsWith("/api/")
+			))
 			.oauth2Login(oauth2 -> oauth2
 				.userInfoEndpoint(userInfo -> userInfo.userService(customOAuth2UserService))
 				.successHandler(oAuth2SuccessHandler)
