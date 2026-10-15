@@ -49,6 +49,8 @@ public class SecurityConfig {
 				.requestMatchers(HttpMethod.POST, "/api/members").permitAll()
 				.requestMatchers(HttpMethod.POST, "/internal/usage-logs").permitAll()
 				.requestMatchers(HttpMethod.POST, "/api/ingestion/**").permitAll()
+				// [이슈 #11] Observe 수집 v2도 기존 수집 API처럼 프로젝트 API 키로 서비스에서 인증한다.
+				.requestMatchers(HttpMethod.POST, "/api/v2/observe/events").permitAll()
 				.requestMatchers("/api/dashboard/**").permitAll()
 				.requestMatchers("/dashboard").permitAll()
 				.requestMatchers("/login", "/oauth2/**", "/error").permitAll()
