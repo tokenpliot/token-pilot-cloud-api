@@ -79,8 +79,8 @@ public final class PayloadFingerprint {
 		return sha256Hex(canonical.toString());
 	}
 
-	/** Length-prefixed so values containing separators cannot collide across fields. */
-	private static void field(StringBuilder out, String name, Object value) {
+	/** Length-prefixed so values containing separators cannot collide across fields. Shared with {@link ObserveEventFingerprint}. */
+	static void field(StringBuilder out, String name, Object value) {
 		String text = value == null ? "" : value.toString();
 		out.append(name).append(':').append(value == null ? '-' : '+').append(text.length()).append(':')
 			.append(text).append('\n');

@@ -9,10 +9,10 @@ import java.time.LocalDateTime;
  * @param reconciliationRequiredEventCount  격리되었거나 사용량을 몰라 사람이 대조해야 하는 이벤트 수 (RECONCILIATION_REQUIRED)
  */
 public record ReconciliationSummaryResponse(
-        String projectId,
-        String environment,
-        LocalDateTime from,
-        LocalDateTime to,
-        long unpricedEventCount,
-        long reconciliationRequiredEventCount) {
+		String projectId,
+		String environment,
+		LocalDateTime from,
+		LocalDateTime to,
+		long unpricedEventCount,
+		long reconciliationRequiredEventCount) {
 }

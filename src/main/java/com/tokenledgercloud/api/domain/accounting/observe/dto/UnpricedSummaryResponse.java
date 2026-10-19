@@ -11,14 +11,14 @@ import java.util.List;
  * @param items              공급자/모델별 내역
  */
 public record UnpricedSummaryResponse(
-        String projectId,
-        String environment,
-        LocalDateTime from,
-        LocalDateTime to,
-        long unpricedEventCount,
-        List<Item> items) {
+		String projectId,
+		String environment,
+		LocalDateTime from,
+		LocalDateTime to,
+		long unpricedEventCount,
+		List<Item> items) {
 
-    /** 공급자/모델별 한 줄. */
-    public record Item(String provider, String model, long eventCount, long totalTokens) {
-    }
+	/** 공급자/모델별 한 줄. */
+	public record Item(String provider, String model, long eventCount, long totalTokens) {
+	}
 }

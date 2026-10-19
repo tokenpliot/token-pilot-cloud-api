@@ -7,6 +7,7 @@ import java.util.UUID;
 import com.tokenledgercloud.api.domain.accounting.AccountingStatus;
 import com.tokenledgercloud.api.domain.accounting.CallStatus;
 import com.tokenledgercloud.api.domain.accounting.SettlementState;
+import com.tokenledgercloud.api.domain.accounting.TokenSemantics;
 
 import jakarta.persistence.*;
 import lombok.*;
@@ -116,6 +117,21 @@ public class UsageLog {
 	@Column(name = "settlement_state", nullable = false, length = 20)
 	private String settlementState;
 
+	// [이슈 #11] 이벤트가 따른 계약 버전. V6의 schema_version 컬럼과 같다. 기존 수집 경로는 legacy-v0로 저장한다.
+	@Column(name = "schema_version", nullable = false, length = 50)
+	private String schemaVersion;
+
+	// [이슈 #11] 토큰 항목의 포함 의미. V6의 token_semantics 컬럼과 같다. 기존 수집 경로는 LEGACY_UNKNOWN이다.
+	@Column(name = "token_semantics", nullable = false, length = 30)
+	private String tokenSemantics;
+
+	// [이슈 #11] 이벤트를 기록한 주체. 기존 수집 경로는 UNKNOWN이고 actorId는 비어 있다.
+	@Column(name = "actor_type", nullable = false, length = 30)
+	private String actorType;
+
+	@Column(name = "actor_id", length = 128)
+	private String actorId;
+
 	@Column(name = "occurred_at", nullable = false)
 	private LocalDateTime occurredAt;
 
@@ -158,6 +174,16 @@ public class UsageLog {
 		// [이슈 #11] 정산 상태를 지정하지 않으면 UNSETTLED로 저장한다. (DB 기본값과 같은 값)
 		if (settlementState == null || settlementState.isBlank()) {
 			settlementState = SettlementState.UNSETTLED.name();
+		}
+		// [이슈 #11] 계약 버전, 토큰 의미, 기록 주체를 지정하지 않은 기존 수집 경로의 기본값. (DB 기본값과 같은 값)
+		if (schemaVersion == null || schemaVersion.isBlank()) {
+			schemaVersion = "legacy-v0";
+		}
+		if (tokenSemantics == null || tokenSemantics.isBlank()) {
+			tokenSemantics = TokenSemantics.LEGACY_UNKNOWN.name();
+		}
+		if (actorType == null || actorType.isBlank()) {
+			actorType = "UNKNOWN";
 		}
 		if (sourceType == null || sourceType.isBlank()) {
 			sourceType = "sdk";

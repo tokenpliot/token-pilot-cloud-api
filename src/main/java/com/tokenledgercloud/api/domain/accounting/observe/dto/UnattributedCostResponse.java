@@ -11,11 +11,11 @@ import java.time.LocalDateTime;
  * @param currency              통화 (현재 USD만 사용)
  */
 public record UnattributedCostResponse(
-        String projectId,
-        String environment,
-        LocalDateTime from,
-        LocalDateTime to,
-        long quarantinedEventCount,
-        BigDecimal pricedActualAmountUsd,
-        String currency) {
+		String projectId,
+		String environment,
+		LocalDateTime from,
+		LocalDateTime to,
+		long quarantinedEventCount,
+		BigDecimal pricedActualAmountUsd,
+		String currency) {
 }

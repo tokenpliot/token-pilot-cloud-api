@@ -9,7 +9,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * Ingestion limits and privacy switches. Defaults live in code so they hold in every environment;
  * override with {@code token-pilot.ingestion.*} properties, no code change needed.
  *
- * @param maxEventBytes         largest accepted body of {@code POST /api/ingestion/events}
+ * @param maxEventBytes         largest accepted body of {@code POST /api/ingestion/events} and {@code POST /api/v2/observe/events}
  * @param maxBatchBytes         largest accepted body of {@code POST /api/ingestion/events/batch}
  * @param forbiddenMetadataKeys metadata keys (any depth, case-insensitive) that suggest raw prompt or response text; dropped before storage, or rejected in strict mode
  * @param strictMetadata        when true, forbidden keys and metadata outside the allowed format are rejected instead of dropped / only logged

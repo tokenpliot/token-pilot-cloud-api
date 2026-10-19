@@ -263,3 +263,14 @@
 | 배치 항목별 결과, 순서만 바꾼 재전송, 부분 실패, 동시 배치 | `IngestionBatchIntegrationTest` |
 | `schemaVersion`, metadata 정책, 크기 제한, 입력값 비반사 | `IngestionRequestValidationTest`, `IngestionMetadataPolicyTest`, `IngestionRequestSizeFilterTest`, `IngestionHttpIntegrationTest`, `IngestionValidationResponseTest`, `IngestionBatchMetadataIntegrationTest` |
 | 잘못된 API Key는 아무것도 저장하지 않음, 검사 순서 | `ProjectApiKeyAuthenticatorTest`, `ProjectApiKeyAuthenticatorIntegrationTest`, `IngestionApiKeyFailureIntegrationTest`, `IngestionAuthOrderHttpTest` |
+
+## 10. Observe 수집 v2 `POST /api/v2/observe/events` (#11)
+
+v1과 별개의 새 엔드포인트다. 위 v1 계약은 바뀌지 않는다. 금액은 받지 않고 서버가 가격표로 계산해 원장(`usage_accounting_values`)에 기록한다.
+
+- **켜기**: 기본은 꺼져 있다(`404`). `token-pilot.observe.ingestion.enabled=true`로 켠다. `token-pilot.observe.ingestion.rate-unit-tokens`(가격표 요율이 몇 토큰당인지)를 확인해 넣기 전까지 모든 이벤트는 금액 없이 `UNPRICED`(사유 `RATE_UNIT_UNCONFIRMED`)로 기록된다.
+- **인증·크기**: v1과 같다. `X-API-Key` 프로젝트 키, 단건 크기 제한(`max-event-bytes`), 회원용 키 필터는 이 경로를 건너뛴다. 환경 제한이 없는 키는 요청의 `environment`로 저장한다.
+- **요청**: `projectKey`, `environment`, `eventId`(필수), `requestId`, `schemaVersion`=`observe-v1`, `tokenSemantics`=`INCLUSIVE_V1`, `provider`, `model`, `callStatus`, 토큰(`SUCCEEDED`면 `promptTokens`·`completionTokens` 필수, 캐시·추론 토큰은 부모에 포함), `occurredAt`(오프셋 필수, UTC로 저장).
+- **응답**: 새 이벤트 `201`, 같은 `eventId`·같은 본문 재전송 `200`(`duplicate: true`, 가격을 다시 계산하지 않음), 같은 `eventId`·다른 본문 `409`. v1은 중복에도 `201`이라는 점이 다르다.
+- **가격 미상**: 가격표 없음, USD 아님, 요율 누락, 범위 초과, 같은 가격표 버전에 내용이 다른 스냅샷이 이미 있음(`PRICE_SNAPSHOT_CONFLICT`)은 모두 0달러가 아니라 `UNPRICED`로 기록되고 `/api/observe/ledger/unpriced`·`/reconciliation`에 나타난다. `rate-unit-tokens`를 가격 계산 이후에 바꾸면 기존 스냅샷과 충돌하므로 가격표 버전을 새로 올려야 한다.
+- **테스트**: `ObserveIngestionHttpIntegrationTest`(보안 체인·크기 필터 포함), `ObserveIngestionServiceTest`, `ObserveIngestionUnconfirmedUnitTest`.

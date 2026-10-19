@@ -8,6 +8,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import com.tokenledgercloud.api.global.response.ApiFieldError;
 import com.tokenledgercloud.api.global.response.ApiResponse;
@@ -34,6 +35,13 @@ public class GlobalExceptionHandler {
 
 		return ResponseEntity.status(ErrorCode.INVALID_INPUT.getStatus())
 			.body(ApiResponse.error(ErrorCode.INVALID_INPUT.getCode(), ErrorCode.INVALID_INPUT.getMessage(), errors));
+	}
+
+	// Unmapped paths (including feature-flagged controllers that are switched off) are 404, not the 500 fallback below.
+	@ExceptionHandler(NoResourceFoundException.class)
+	public ResponseEntity<ApiResponse<Void>> handleNoResource(NoResourceFoundException exception) {
+		return ResponseEntity.status(ErrorCode.NOT_FOUND.getStatus())
+			.body(ApiResponse.error(ErrorCode.NOT_FOUND.getCode(), ErrorCode.NOT_FOUND.getMessage()));
 	}
 
 	@ExceptionHandler(Exception.class)
