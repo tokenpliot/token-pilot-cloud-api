@@ -31,7 +31,8 @@ import jakarta.servlet.http.HttpServletResponse;
  *
  * <p>A declared {@code Content-Length} over the limit is refused without reading the body. Otherwise at most
  * limit+1 bytes are read (so chunked requests are bounded too) and handed on unchanged, which keeps memory use
- * within the configured limit. Only the ingestion POST endpoints (v1 single/batch, v2 observe) are affected.
+ * within the configured limit. Only the ingestion POST endpoints are affected: the two v1 endpoints and the
+ * Observe v2 event endpoint (which shares the single-event limit).
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 10)
@@ -39,6 +40,7 @@ public class IngestionRequestSizeFilter extends OncePerRequestFilter {
 
 	static final String EVENT_PATH = "/api/ingestion/events";
 	static final String BATCH_PATH = "/api/ingestion/events/batch";
+	// [이슈 #11] Observe 수집 v2도 같은 방식으로 본문 크기를 제한한다. 이벤트 한 건짜리 요청이라 단건 한도를 쓴다.
 	static final String OBSERVE_EVENT_PATH = "/api/v2/observe/events";
 
 	private static final UrlPathHelper URL_PATH_HELPER = UrlPathHelper.defaultInstance;
@@ -81,11 +83,14 @@ public class IngestionRequestSizeFilter extends OncePerRequestFilter {
 		if (path.length() > 1 && path.endsWith("/")) {
 			path = path.substring(0, path.length() - 1);
 		}
-		if (EVENT_PATH.equals(path) || OBSERVE_EVENT_PATH.equals(path)) {
+		if (EVENT_PATH.equals(path)) {
 			return properties.maxEventBytes();
 		}
 		if (BATCH_PATH.equals(path)) {
 			return properties.maxBatchBytes();
+		}
+		if (OBSERVE_EVENT_PATH.equals(path)) {
+			return properties.maxEventBytes();
 		}
 		return -1;
 	}
