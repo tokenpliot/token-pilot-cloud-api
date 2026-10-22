@@ -51,6 +51,8 @@ public class ObserveIngestionService {
 	private final AccountingLedgerWriter ledgerWriter;
 	// 요율 단위 등 v2 수집 설정.
 	private final ObserveIngestionProperties properties;
+	// metadata에서 금지 키를 빼고 저장용 JSON으로 바꾸는 빈. v1 수집과 같은 것을 쓴다.
+	private final IngestionMetadataSerializer metadataSerializer;
 
 	/** 이벤트를 수집한다. */
 	public ObserveEventResponse collect(String apiKey, ObserveEventRequest request) {
@@ -61,7 +63,9 @@ public class ObserveIngestionService {
 		// 다르면 이미 거절했으므로, 저장에는 v1과 같이 요청 환경을 쓴다.
 		String environment = request.environment();
 		LocalDateTime occurredAt = request.occurredAt().withOffsetSameInstant(ZoneOffset.UTC).toLocalDateTime();
-		String fingerprint = ObserveEventFingerprint.of(request, occurredAt);
+		// metadata는 v1과 같은 방식으로 금지 키를 빼고 JSON으로 만든다. 저장과 지문에 같은 값을 쓴다.
+		String metadataJson = metadataSerializer.toJson(request.metadata());
+		String fingerprint = ObserveEventFingerprint.of(request, occurredAt, metadataJson);
 
 		// 2. 호출이 성공했을 때만 토큰을 검증한다. 그 밖의 상태는 금액을 만들지 않는다.
 		UsageTokens tokens = request.callStatus() == CallStatus.SUCCEEDED ? tokensOf(request) : null;
@@ -93,7 +97,7 @@ public class ObserveIngestionService {
 					tokens == null ? 0 : tokens.totalTokens(),
 					occurredAt, request.callStatus(),
 					pricing.amount(), pricing.snapshotId(), null, pricing.reasonCode(),
-					EVENT_ACTOR_TYPE, auth.apiKeyId());
+					EVENT_ACTOR_TYPE, auth.apiKeyId(), metadataJson);
 		} catch (IllegalArgumentException exception) {
 			throw new ApiException(ErrorCode.INVALID_INPUT, exception.getMessage());
 		}

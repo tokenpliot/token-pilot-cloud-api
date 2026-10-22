@@ -1,9 +1,11 @@
 package com.tokenledgercloud.api.domain.ingestion.dto;
 
 import java.time.OffsetDateTime;
+import java.util.Map;
 
 import com.tokenledgercloud.api.domain.accounting.CallStatus;
 import com.tokenledgercloud.api.domain.accounting.TokenSemantics;
+import com.tokenledgercloud.api.domain.ingestion.validation.ValidIngestionMetadata;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -21,6 +23,9 @@ import jakarta.validation.constraints.Size;
  * @param cachedPromptTokens 모르면 생략한다. 0과 다르다.
  * @param reasoningTokens    모르면 생략한다. 0과 다르다.
  * @param occurredAt     호출이 발생한 시각. 오프셋이 필수이며(v1과 같은 형식, 예: 2026-10-01T00:00:00Z) 서버가 UTC로 바꿔 저장한다.
+ * @param metadata       선택. 추적 상관관계(trace_id, app_request_id 등). v1 수집과 규칙이 같다.
+ *                       기본 모드는 금지 키(prompt, completion, messages 등)를 저장 전에 버리고 형식 위반은 경고만 남기며,
+ *                       엄격 모드(token-pilot.ingestion.strict-metadata=true)는 둘 다 400으로 거절한다.
  */
 public record ObserveEventRequest(
 	@NotBlank @Size(max = 128) String projectKey,
@@ -36,6 +41,7 @@ public record ObserveEventRequest(
 	@PositiveOrZero Long completionTokens,
 	@PositiveOrZero Long cachedPromptTokens,
 	@PositiveOrZero Long reasoningTokens,
-	@NotNull OffsetDateTime occurredAt
+	@NotNull OffsetDateTime occurredAt,
+	@ValidIngestionMetadata Map<String, Object> metadata
 ) {
 }

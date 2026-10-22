@@ -69,6 +69,8 @@ public class AccountingLedgerTx {
 				.totalCostUsd(BigDecimal.ZERO)
 				.pricingVersion(LEDGER_PRICING_VERSION)
 				.sourceType(LEDGER_SOURCE_TYPE)
+				// v1과 같이 금지 키를 뺀 metadata JSON을 그대로 저장한다.
+				.metadataJson(command.metadataJson())
 				.occurredAt(command.occurredAt())
 				.accountingStatus(AccountingStatus.PENDING.name())
 				.callStatus(command.callStatus().name())
