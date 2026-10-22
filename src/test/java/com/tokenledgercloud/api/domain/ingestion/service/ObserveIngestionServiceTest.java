@@ -97,7 +97,7 @@ class ObserveIngestionServiceTest {
 			Long prompt, Long completion, Long cached, Long reasoning) {
 		return new ObserveEventRequest("project-key", "prod", eventId, "req-" + eventId, "observe-v1",
 				TokenSemantics.INCLUSIVE_V1, "openai", model, callStatus,
-				prompt, completion, cached, reasoning, OffsetDateTime.of(2026, 10, 10, 12, 0, 0, 0, ZoneOffset.UTC));
+				prompt, completion, cached, reasoning, OffsetDateTime.of(2026, 10, 10, 12, 0, 0, 0, ZoneOffset.UTC), null);
 	}
 
 	// 이벤트에 연결된 원장 행 목록을 읽는 도우미.
@@ -179,7 +179,7 @@ class ObserveIngestionServiceTest {
 				original.eventId(), original.requestId(), original.schemaVersion(), original.tokenSemantics(),
 				original.provider(), original.model(), original.callStatus(), original.promptTokens(),
 				original.completionTokens(), original.cachedPromptTokens(), original.reasoningTokens(),
-				OffsetDateTime.of(2026, 10, 10, 21, 0, 0, 0, ZoneOffset.ofHours(9))));
+				OffsetDateTime.of(2026, 10, 10, 21, 0, 0, 0, ZoneOffset.ofHours(9)), original.metadata()));
 		assertThat(second.duplicate()).isTrue();
 		assertThat(second.usageEventId()).isEqualTo(first.usageEventId());
 		assertThat(usageLogRepository.findById(first.usageEventId()).orElseThrow().getOccurredAt())

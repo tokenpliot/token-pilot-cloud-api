@@ -38,7 +38,8 @@ public record AccountingLedgerCommand(
 		String evidenceReference,   // 공급자 청구 등 근거 식별자 (PROVIDER_BILLING일 때 필수)
 		String reasonCode,          // 기록 사유 코드
 		String actorType,           // 기록 주체 종류
-		String actorId) {           // 기록 주체 식별자
+		String actorId,             // 기록 주체 식별자
+		String metadataJson) {      // 금지 키를 뺀 metadata JSON (없으면 null). usage_events.metadata_json에 그대로 저장한다.
 
 	// 레코드 생성 시점에 입력 값을 검사한다. 잘못된 값은 DB에 닿기 전에 막는다.
 	public AccountingLedgerCommand {

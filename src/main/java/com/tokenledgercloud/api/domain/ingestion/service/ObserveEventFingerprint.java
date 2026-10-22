@@ -24,8 +24,9 @@ final class ObserveEventFingerprint {
 	 * 요청 필드를 정해진 순서로 이어 붙여 지문을 만든다.
 	 *
 	 * @param occurredAtUtc 요청의 발생 시각을 UTC로 바꾼 값. 같은 순간을 다른 오프셋으로 보내도 같은 지문이 된다.
+	 * @param metadataJson  금지 키를 뺀 저장용 metadata JSON({@link IngestionMetadataSerializer#toJson}). 없으면 null.
 	 */
-	static String of(ObserveEventRequest request, LocalDateTime occurredAtUtc) {
+	static String of(ObserveEventRequest request, LocalDateTime occurredAtUtc, String metadataJson) {
 		StringBuilder canonical = new StringBuilder(VERSION).append('\n');
 		PayloadFingerprint.field(canonical, "requestId", request.requestId());
 		PayloadFingerprint.field(canonical, "schemaVersion", request.schemaVersion());
@@ -39,6 +40,13 @@ final class ObserveEventFingerprint {
 		PayloadFingerprint.field(canonical, "reasoningTokens", request.reasoningTokens());
 		// 저장 정밀도(마이크로초)에 맞춰 자른다.
 		PayloadFingerprint.field(canonical, "occurredAt", occurredAtUtc.truncatedTo(ChronoUnit.MICROS));
+		// metadata는 v1과 같이 금지 키를 뺀 저장용 JSON을 키 정렬해 넣는다. (키 순서가 달라도 같은 지문)
+		// 비어 있으면 줄 자체를 넣지 않는다. metadata가 생기기 전에 저장된 행의 지문과 같게 유지해서,
+		// 그 이벤트를 metadata 없이 재전송해도 계속 중복(200)으로 인식되게 한다.
+		String metadata = PayloadFingerprint.canonicalMetadata(metadataJson);
+		if (!metadata.isEmpty()) {
+			PayloadFingerprint.field(canonical, "metadata", metadata);
+		}
 		return HashingUtil.sha256(canonical.toString());
 	}
 }

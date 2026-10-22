@@ -86,7 +86,8 @@ public final class PayloadFingerprint {
 			.append(text).append('\n');
 	}
 
-	private static String canonicalMetadata(String metadataJson) {
+	/** Keys sorted recursively; null/blank/empty object are all {@code ""}. Shared with {@link ObserveEventFingerprint}. */
+	static String canonicalMetadata(String metadataJson) {
 		if (metadataJson == null || metadataJson.isBlank()) {
 			return "";
 		}
