@@ -1,0 +1,45 @@
+plugins {
+    id 'org.springframework.boot'
+    id 'io.spring.dependency-management'
+    id 'java'
+}
+
+group = 'cloud.token-pilot'
+version = '0.0.1-SNAPSHOT'
+
+repositories {
+    mavenLocal()
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'cloud.token-pilot:token-pilot-starter:0.0.1-SNAPSHOT'
+    implementation 'org.springframework.ai:spring-ai-starter-model-openai'
+
+    // Required for running the web server.
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+
+    // Monitoring support (allows Prometheus to scrape data).
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'io.micrometer:micrometer-registry-prometheus'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.ai:spring-ai-model'
+    testImplementation 'org.springframework.ai:spring-ai-client-chat'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+// Force packaging of the Spring Boot executable.
+bootJar {
+    enabled = true
+}
+
+// Disable the regular library JAR because the executable is the intended artifact.
+jar {
+    enabled = false
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    failOnNoDiscoveredTests = false
+}

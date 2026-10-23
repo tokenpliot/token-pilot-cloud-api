@@ -1,0 +1,9 @@
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: ${PROMETHEUS_URL}  # Use an environment variable instead of a fixed address for local and AWS use.
+    isDefault: true
+    uid: prometheus-uid
