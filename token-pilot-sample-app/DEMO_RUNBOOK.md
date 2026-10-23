@@ -1,0 +1,222 @@
+# Token Pilot demo runbook (Korean)
+
+영문 버전은 [`DEMO_RUNBOOK_EN.md`](DEMO_RUNBOOK_EN.md)에서 확인할 수 있습니다.
+
+이 데모는 `demo` Spring profile에서만 활성화되는 네트워크 없는 가짜
+`ChatModel`을 사용합니다. 별도 자격 증명이나 외부 호출 없이도 context admission,
+atomic reservation, idempotency, release, actual reconciliation을 반복해서 확인할 수
+있습니다.
+
+## 1. 앱 실행
+
+프로젝트 루트에서 실행합니다.
+
+```bash
+./gradlew --no-daemon :token-pilot-sample-app:bootRun \
+  --args='--spring.profiles.active=demo'
+```
+
+앱은 `http://localhost:8080`에서 대기합니다. 별도 API key는 필요하지 않습니다.
+
+## 2. 한 번에 시나리오 실행
+
+먼저 데모 상태와 시나리오 목록을 보여줍니다.
+
+```bash
+curl -s http://localhost:8080/test/token-pilot/demo | jq
+```
+
+8개 시나리오를 실행하고 핵심 검증 필드만 출력합니다.
+
+```bash
+curl -s http://localhost:8080/test/token-pilot/demo/run | jq '{
+  runId,
+  scenarios: [.scenarios[] | {
+    scenario,
+    status,
+    providerInvocations: .evidence.providerInvocations,
+    admittedRequests: .evidence.admittedRequests,
+    blockedRequests: .evidence.blockedRequests,
+    accountingState: .evidence.accountingState,
+    budget: .evidence.budget
+  }],
+  metrics
+}'
+```
+
+핵심 기대 결과는 다음과 같습니다.
+
+- `context-fit` → `FITS`, provider 호출 `0`
+- `context-block` → `EXCEEDS`, provider 호출 `0`
+- `budget-concurrency` → `admittedRequests=1`, `blockedRequests=7`, `providerInvocations=1`
+- `idempotency` → `sameIdempotencyKey=true`, provider 호출 `1`
+- `reconciliation-success` → `COMMITTED`
+- `reconciliation-failure`, `reconciliation-unknown` → `RECONCILIATION_REQUIRED`
+
+개별 장면을 다시 찍고 싶을 때는 다음 endpoint를 사용합니다.
+
+```bash
+curl -s http://localhost:8080/test/token-pilot/demo/context-block | jq
+curl -s http://localhost:8080/test/token-pilot/demo/budget-concurrency | jq
+curl -s http://localhost:8080/test/token-pilot/demo/idempotency | jq
+curl -s http://localhost:8080/test/token-pilot/demo/reconciliation-failure | jq
+```
+
+## 3. Prometheus와 Grafana 실행
+
+앱은 호스트에서 실행하고 monitoring container만 띄웁니다.
+
+```bash
+docker compose -f token-pilot-sample-app/docker-compose.yml up --build -d
+```
+
+확인할 주소는 다음과 같습니다.
+
+- Prometheus target: `http://localhost:9090/targets` → `token-pilot-backend`가 `UP`
+- Prometheus query: `http://localhost:9090/graph`
+- Grafana: `http://localhost:3000` → `Token Pilot Demo` dashboard 선택
+
+Prometheus는 `host.docker.internal:8080/actuator/prometheus`를 scrape하도록 구성되어
+있습니다. 앱의 `/run`을 실행한 뒤 10초 정도 기다리면 Grafana stat과 time-series에
+`tokenpilot_*` 값이 표시됩니다.
+
+```bash
+curl -s http://localhost:8080/actuator/prometheus \
+  | rg '^tokenpilot_(preflight|budget|cost|reconciliation)'
+```
+
+검증이 끝나면 monitoring container를 정리합니다.
+
+```bash
+docker compose -f token-pilot-sample-app/docker-compose.yml down
+```
+
+## 4. OpenAI provider smoke 시나리오
+
+`demo` 앱을 먼저 종료한 뒤(`Ctrl+C`) 실제 OpenAI 호출을 수행합니다. 이 경로는
+외부 네트워크와 API key를 사용하며, 호출 비용은 OpenAI 계정에 청구됩니다. API key를
+소스 파일이나 커밋에 넣지 말고 환경 변수로만 전달합니다.
+
+기본 smoke 모델은 Token Pilot catalog에 등록된
+`gpt-4o-mini-2024-07-18`입니다. 다른 모델을 사용하려면 Token Pilot catalog와
+가격 설정도 함께 맞춰야 합니다.
+
+```bash
+export OPENAI_API_KEY='발급받은 OpenAI API key'
+export OPENAI_MODEL='gpt-4o-mini-2024-07-18'
+
+./gradlew --no-daemon :token-pilot-sample-app:bootRun \
+  --args='--spring.profiles.active=openai-smoke'
+```
+
+다른 터미널에서 한 번 호출합니다.
+
+```bash
+curl -sS --get http://localhost:8080/test/token-pilot/openai-smoke \
+  --data-urlencode 'prompt=Reply with one short sentence confirming the provider is reachable.' \
+  | jq
+```
+
+정상 결과는 `status=PASS`, `usageSource`가 `UNAVAILABLE`이 아닌 값, 그리고
+`accountingState=COMMITTED`입니다. 응답에는 provider 응답 토큰 수와 실제 정산 비용도
+함께 포함됩니다.
+
+```bash
+curl -sS http://localhost:8080/actuator/prometheus \
+  | rg '^tokenpilot_(preflight|budget|cost|reconciliation)'
+```
+
+자동화된 smoke test를 직접 실행할 때는 반드시 두 조건을 명시합니다. 일반적인
+`./gradlew test`에서는 실제 호출이 발생하지 않습니다.
+
+```bash
+RUN_OPENAI_SMOKE=true \
+  ./gradlew --no-daemon :token-pilot-sample-app:test \
+  --tests io.tokenpilot.sample.OpenAiSmokeE2ETest
+```
+
+demo와 smoke를 연속으로 확인하려면 `demo` 프로필에서 `/demo/run`을 실행하고 앱을
+종료한 다음, 위의 `openai-smoke` 프로필을 다시 시작해 smoke endpoint를 호출합니다.
+두 프로필은 같은 `8080` 포트를 사용하므로 동시에 실행하지 않습니다.
+
+## 5. 상태 초기화
+
+앱을 종료한 뒤 다시 `bootRun`하면 in-memory budget과 Micrometer counter가
+초기화됩니다.
+
+
+## 6. Observe Cloud API E2E 연동 및 장애 주입(Fault Injection) 검증
+
+이 섹션은 샘플 앱과 중앙 수집 백엔드(`token-pilot-cloud-api`) 간의 비동기 사용량 수집 파이프라인(단건 성공, 호출 전 실패, 결과 불명확, 배치 부분 실패)과 비차단(Non-blocking) 장애 격리 기능을 검증하기 위한 가이드입니다.
+
+### 6.1. 사전 준비 (MySQL 컨테이너 및 백엔드 수집 서버 실행)
+
+1. 로컬 테스트용 MySQL 컨테이너를 실행합니다 (`3307` 포트).
+
+```bash
+docker run --name token-mysql-test -p 3307:3306 \
+  -e MYSQL_ROOT_PASSWORD=root \
+  -e MYSQL_DATABASE=token_ledger \
+  -d mysql:8.0
+```
+
+2. 중앙 수집 API 서버는 기본 포트가 `8080`이므로, 샘플 앱(`8080`)과의 포트 충돌을 피하기 위해 별도 터미널에서 `8081` 포트로 실행합니다.
+
+```bash
+cd token-pilot-cloud-api
+export JWT_SECRET="local_test_jwt_secret_key_1234567890_abcdefg"
+
+./gradlew bootRun --args='--server.port=8081 --spring.datasource.url=jdbc:mysql://127.0.0.1:3307/token_ledger --spring.datasource.username=root --spring.datasource.password=root --spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver --spring.jpa.hibernate.ddl-auto=none'
+```
+
+3. 서버가 기동되어 Flyway 스키마 마이그레이션이 완료되면, E2E 검증용 조직·프로젝트 및 프로젝트 API Key(평문: `password`)를 등록합니다.
+
+```bash
+docker exec token-mysql-test mysql -uroot -proot token_ledger -e "
+INSERT IGNORE INTO organizations (id, name, plan, default_currency) VALUES ('org-demo-1111', 'Demo Org', 'FREE', 'USD');
+INSERT IGNORE INTO projects (id, organization_id, project_key, name, status, default_model) VALUES ('proj-demo-1111', 'org-demo-1111', 'demo-project', 'Demo Project', 'ACTIVE', 'gpt-4o-mini');
+DELETE FROM project_api_keys WHERE id='key-demo-1111';
+INSERT INTO project_api_keys (id, organization_id, project_id, environment, name, key_prefix, key_hash, status) VALUES ('key-demo-1111', 'org-demo-1111', 'proj-demo-1111', 'demo', 'demo-key', 'password', '\$2a\$10\$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG', 'ACTIVE');
+"
+```
+
+### 6.2. E2E 연동 및 정상 수집 검증
+
+1. 샘플 앱을 `demo` 프로필로 실행하되, 기본적으로 비활성화(`false`)되어 있는 Observe 수집 옵션을 활성화(`--token-pilot.observe.enabled=true`)하여 실행합니다 (`8080` 포트).
+
+```bash
+./gradlew --no-daemon :token-pilot-sample-app:bootRun \
+  --args='--spring.profiles.active=demo --token-pilot.observe.enabled=true'
+```
+
+2. 별도 터미널에서 데모 시나리오를 실행합니다.
+
+```bash
+curl -s http://localhost:8080/test/token-pilot/demo/run | jq
+```
+
+3. 확인 사항:
+    - 샘플 앱 터미널에 단건 성공(`single`), 실패/불명확 흐름(`non_success`)에 대해 `[Observe 전송 성공] Status: 201` 로그가 출력되는지 확인합니다.
+    - 배치 부분 실패(`batch`) 시나리오에 대해 `[Observe 전송 성공] (batch) Status: 200` 및 `acceptedCount: 1, rejectedCount: 1` 응답이 출력되는지 확인합니다.
+    - 백엔드(`8081`) 터미널 및 `usage_events` 테이블에 데이터가 정상 `INSERT` 되는지 확인합니다.
+
+### 6.3. 장애 주입 테스트 (Non-Blocking 및 API Key 오류 검증)
+
+수집 서버가 다운되거나 API Key가 폐기/오류 상태여도 샘플 앱의 메인 로직이 차단되지 않는지 검증합니다.
+
+1. `8081` 포트에서 실행 중인 백엔드 서버를 강제로 종료합니다 (`Ctrl + C`).
+2. 샘플 앱에서 다시 데모 시나리오를 호출합니다.
+
+```bash
+curl -s http://localhost:8080/test/token-pilot/demo/run | jq
+```
+
+3. 확인 사항:
+    - 수집 서버가 꺼져 있어도 8개 데모 시나리오 결과는 모두 `PASS`로 정상 반환됩니다.
+    - 샘플 앱 터미널에 `[Observe 통신 실패 - Non-blocking 격리 작동] ... java.net.ConnectException` 경고 로그가 출력되지만, 애플리케이션은 중단되지 않고 정상 유지됩니다.
+    - 응답 JSON의 `metrics.observeIngestionFailure` 또는 `/actuator/prometheus`의 `tokenpilot_observe_ingestion_failure_total` 카운터가 증가하는지 확인합니다.
+
+```bash
+curl -s http://localhost:8080/actuator/prometheus \
+  | rg '^tokenpilot_observe_ingestion'
+```
