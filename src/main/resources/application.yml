@@ -70,7 +70,7 @@ jwt:
 # --- Ingestion limits and privacy (optional; the values below are the built-in defaults) ---
 # token-pilot:
 #   ingestion:
-#     max-event-bytes: 16384        # POST /api/ingestion/events body limit; larger requests get 413 (INGESTION-413)
+#     max-event-bytes: 16384        # POST /api/ingestion/events and /api/v2/observe/events body limit; larger requests get 413 (INGESTION-413)
 #     max-batch-bytes: 1048576      # POST /api/ingestion/events/batch body limit
 #     forbidden-metadata-keys: [prompt, system_prompt, completion, messages, content, response]
 #                                   # metadata keys (any depth, case-insensitive) that suggest raw text: dropped
@@ -78,3 +78,9 @@ jwt:
 #     strict-metadata: false        # true: forbidden keys and metadata with >16 entries, bad key format, non-string
 #                                   # or >256-char values are rejected with 400; false: forbidden keys are dropped and
 #                                   # format violations only log a warning (kinds and counts, never keys or values)
+#   observe:
+#     ingestion:
+#       enabled: false              # true registers POST /api/v2/observe/events (otherwise 404)
+#       rate-unit-tokens: 0         # tokens per pricing_plans rate (e.g. 1000000). 0 = unconfirmed: every event is
+#                                   # recorded UNPRICED. Changing it after events were priced conflicts with stored
+#                                   # snapshots of the same plan version (events become UNPRICED) until the plan version is bumped

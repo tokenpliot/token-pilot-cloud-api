@@ -12,10 +12,10 @@ import com.tokenledgercloud.api.domain.accounting.entity.UsageAccountingValue;
  */
 public interface UsageAccountingValueRepository extends JpaRepository<UsageAccountingValue, String> {
 
-    /**
-     * 이벤트의 특정 종류(ESTIMATED/ACTUAL) 값 중 개정 번호가 가장 큰 최신 값을 조회한다.
-     * 집계는 이 최신 개정본만 사용해야 이중 계산이 없다.
-     */
-    Optional<UsageAccountingValue> findFirstByUsageEventIdAndValueKindOrderByRevisionDesc(
-            String usageEventId, AccountingAmount.Kind valueKind);
+	/**
+	 * 이벤트의 특정 종류(ESTIMATED/ACTUAL) 값 중 개정 번호가 가장 큰 최신 값을 조회한다.
+	 * 집계는 이 최신 개정본만 사용해야 이중 계산이 없다.
+	 */
+	Optional<UsageAccountingValue> findFirstByUsageEventIdAndValueKindOrderByRevisionDesc(
+			String usageEventId, AccountingAmount.Kind valueKind);
 }

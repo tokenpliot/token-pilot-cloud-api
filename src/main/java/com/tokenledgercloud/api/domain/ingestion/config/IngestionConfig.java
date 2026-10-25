@@ -7,7 +7,7 @@ import org.springframework.context.annotation.Configuration;
 import com.tokenledgercloud.api.domain.ingestion.validation.IngestionMetadataPolicy;
 
 @Configuration
-@EnableConfigurationProperties(IngestionProperties.class)
+@EnableConfigurationProperties({IngestionProperties.class, ObserveIngestionProperties.class})
 public class IngestionConfig {
 
 	@Bean

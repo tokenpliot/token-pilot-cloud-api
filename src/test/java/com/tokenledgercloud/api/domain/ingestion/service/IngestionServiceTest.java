@@ -53,7 +53,8 @@ class IngestionServiceTest {
 	private Validator validator;
 
 	@Spy
-	private IngestionMetadataPolicy metadataPolicy = new IngestionMetadataPolicy(IngestionProperties.defaults());
+	private IngestionMetadataSerializer metadataSerializer =
+		new IngestionMetadataSerializer(new IngestionMetadataPolicy(IngestionProperties.defaults()));
 
 	@InjectMocks
 	private IngestionService ingestionService;

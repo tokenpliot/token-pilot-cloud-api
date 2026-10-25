@@ -28,11 +28,12 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        // These endpoints authenticate project_api_keys in IngestionService.
+        // These endpoints authenticate project_api_keys in their own services.
         // The member api_keys namespace must not intercept their X-API-Key header.
         String path = request.getRequestURI().substring(request.getContextPath().length());
         return "POST".equals(request.getMethod())
-                && ("/api/ingestion/events".equals(path) || "/api/ingestion/events/batch".equals(path));
+                && ("/api/ingestion/events".equals(path) || "/api/ingestion/events/batch".equals(path)
+                        || "/api/v2/observe/events".equals(path));
     }
 
     @Override
