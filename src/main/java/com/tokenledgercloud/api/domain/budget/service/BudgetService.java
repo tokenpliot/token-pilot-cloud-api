@@ -13,6 +13,8 @@ import com.tokenledgercloud.api.domain.budget.dto.BudgetUpsertRequest;
 import com.tokenledgercloud.api.domain.budget.dto.BudgetUpsertResponse;
 import com.tokenledgercloud.api.domain.budget.entity.MonthlyBudgetSetting;
 import com.tokenledgercloud.api.domain.budget.repository.MonthlyBudgetSettingRepository;
+import com.tokenledgercloud.api.domain.project.repository.ProjectRepository;
+import com.tokenledgercloud.api.domain.policy.CustomerPolicyRepository;
 import com.tokenledgercloud.api.domain.usage.repository.UsageLogRepository;
 import com.tokenledgercloud.api.global.exception.ApiException;
 import com.tokenledgercloud.api.global.exception.BudgetNotFoundException;
@@ -30,9 +32,19 @@ public class BudgetService {
 	private final MonthlyBudgetSettingRepository budgetRepository;
 	private final UsageLogRepository usageLogRepository;
 	private final BudgetCalculator budgetCalculator;
+	private final ProjectRepository projectRepository;
+	private final CustomerPolicyRepository policyRepository;
 
 	@Transactional
 	public BudgetUpsertResponse upsert(BudgetUpsertRequest request) {
+		if (request.projectId() != null) {
+			// Use the same project lock as versioned writes; a racing legacy write cannot erase an audited policy.
+			projectRepository.lockByIdAndOrganizationId(request.projectId(), DEFAULT_ORGANIZATION_ID);
+			if (policyRepository.lockByScope(DEFAULT_ORGANIZATION_ID,
+				request.projectId(), request.environment() == null ? "" : request.environment()).isPresent()) {
+				throw new ApiException(ErrorCode.CONFLICT, "This budget is managed by the versioned policy API.");
+			}
+		}
 		if (!"MONTHLY".equals(request.periodType())) {
 			throw new ApiException(ErrorCode.INVALID_PERIOD_TYPE);
 		}

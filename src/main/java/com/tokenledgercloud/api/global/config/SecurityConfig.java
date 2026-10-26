@@ -57,6 +57,7 @@ public class SecurityConfig {
 				.requestMatchers(HttpMethod.GET, "/api/pricing-catalogs/**").permitAll()
 				// [이슈 #11] Observe 원장 조회 API는 로그인한 사용자만 호출할 수 있다. (아래 개발용 전체 허용보다 먼저 와야 한다)
 				.requestMatchers("/api/observe/**").authenticated()
+				.requestMatchers("/api/policies/**").authenticated()
 				//.anyRequest().authenticated()
 				.anyRequest().permitAll() //개발용
 

@@ -32,6 +32,15 @@ public class MonthlyBudgetSetting {
 	@Column(name = "limit_usd", nullable = false, precision = 18, scale = 6)
 	private BigDecimal limitUsd;
 
+	@Column(nullable = false, length = 3)
+	private String currency;
+	@Column(name = "policy_version", length = 128)
+	private String policyVersion;
+	@Column(name = "updated_by_type", nullable = false, length = 30)
+	private String updatedByType;
+	@Column(name = "updated_by_id", length = 128)
+	private String updatedById;
+
 	@Column(name = "threshold_50_enabled", nullable = false)
 	private Boolean threshold50Enabled;
 
@@ -49,6 +58,8 @@ public class MonthlyBudgetSetting {
 
 	@PrePersist
 	void prePersist() {
+		if (currency == null) currency = "USD";
+		if (updatedByType == null) updatedByType = "UNKNOWN";
 		if (id == null || id.isBlank()) {
 			id = UUID.randomUUID().toString();
 		}

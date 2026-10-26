@@ -66,6 +66,13 @@ curl -X POST http://52.78.69.13:8080/internal/usage-logs \
 - 판정·승인·사용량·정산 API 계약: [`docs/api/control-plane-v1.yaml`](docs/api/control-plane-v1.yaml) (OpenAPI 3.1)
 - MySQL·인증·회계 정합성 및 마이그레이션 설계: [이슈 #9](docs/design/issue-9-data-integrity.md)
 - 계약 테스트: `./gradlew test --tests 'com.tokenledgercloud.api.domain.decision.*'`
+
+## 프로젝트·환경 정책 관리 (Phase 3, #14)
+
+- [관리 API와 요청 예시](docs/api/policy-management.md)
+- [정책 버전·변경 감사·요청 snapshot·rollback 설계](docs/design/issue-14-policy-versions.md)
+- [V7 배포·이관·MySQL 검증 절차](docs/migrations/issue-14/README.md)
+- 정책 테스트: `./gradlew test --tests '*PolicyIntegrationTest'`
 ___
 
 ## Local 실행
