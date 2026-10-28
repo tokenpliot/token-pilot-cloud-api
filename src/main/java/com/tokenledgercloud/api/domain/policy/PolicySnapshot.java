@@ -37,12 +37,13 @@ public class PolicySnapshot {
 	@Column(name = "actor_type", nullable = false, length = 30) private String actorType;
 	@Column(name = "actor_id", nullable = false, length = 128) private String actorId;
 	@Column(name = "created_at", nullable = false) private LocalDateTime createdAt;
-	@Column(name = "change_type", length = 30) private String changeType;
+	@Enumerated(EnumType.STRING) @JdbcTypeCode(SqlTypes.VARCHAR)
+	@Column(name = "change_type", length = 30) private PolicyChangeType changeType;
 	@Column(length = 500) private String reason;
 	@Column(name = "restored_from_version") private Long restoredFromVersion;
 
 	static PolicySnapshot capture(CustomerPolicy policy, PolicyRules rules, String memberId,
-		String changeType, String reason, Long restoredFromVersion, String legacyBudgetId) {
+		PolicyChangeType changeType, String reason, Long restoredFromVersion, String legacyBudgetId) {
 		PolicySnapshot s = new PolicySnapshot();
 		s.id = UUID.randomUUID().toString();
 		s.organizationId = policy.getOrganizationId();

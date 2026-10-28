@@ -21,6 +21,9 @@ import org.springframework.security.web.FilterChainProxy;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import com.tokenledgercloud.api.domain.accounting.snapshot.*;
 import com.tokenledgercloud.api.domain.budget.dto.BudgetUpsertRequest;
@@ -54,6 +57,7 @@ class PolicyIntegrationTest {
 	@Autowired JwtTokenProvider jwt;
 	@Autowired WebApplicationContext web;
 	@Autowired FilterChainProxy filters;
+	@Autowired PlatformTransactionManager transactions;
 	MockMvc mvc;
 	Authentication admin;
 	String token;
@@ -81,7 +85,7 @@ class PolicyIntegrationTest {
 		assertThat(first.rules().monthlySoftLimitUsd()).isNull();
 		assertThat(first.rules().notificationThresholds()).containsExactly(80, 100);
 		assertThat(first.actorId()).isEqualTo("admin");
-		assertThat(first.changeType()).isEqualTo("IMPORT_LEGACY");
+		assertThat(first.changeType()).isEqualTo(PolicyChangeType.IMPORT_LEGACY);
 		var second = policies.replace(admin, "project-a", "prod", replace(1, "25", false));
 		var restored = policies.rollback(admin, "project-a", "prod", new PolicyRequests.Rollback(2L, 1L, "Restore approved policy"));
 		assertThat(restored.revision()).isEqualTo(3);
@@ -163,6 +167,7 @@ class PolicyIntegrationTest {
 	void httpActorIsAuthenticatedMemberAndForeignReadsAreHidden() throws Exception {
 		mvc.perform(put(path()).header("Authorization", "Bearer " + token).contentType(MediaType.APPLICATION_JSON).content(body(0)))
 			.andExpect(status().isOk()).andExpect(jsonPath("$.data.actorId").value("admin"))
+			.andExpect(jsonPath("$.data.changeType").value("CREATE"))
 			.andExpect(jsonPath("$.data.revision").value(1));
 		mvc.perform(get(path()).header("Authorization", bearer("viewer"))).andExpect(status().isOk());
 		for (String suffix : List.of("", "/versions", "/versions/1")) {
@@ -191,6 +196,48 @@ class PolicyIntegrationTest {
 		policies.replace(admin, "project-a", "prod", replace(0, "100", true));
 		mvc.perform(put(path()).header("Authorization", "Bearer " + token).contentType(MediaType.APPLICATION_JSON).content(body(0)))
 			.andExpect(status().isConflict());
+		assertThat(jdbc.queryForObject("select count(*) from policy_snapshots", Integer.class)).isEqualTo(1);
+	}
+
+	@Test
+	void policyWriteRejectsProjectArchivedAfterItWasLoaded() {
+		assertArchivedProjectIsRejected(() -> policies.replace(admin, "project-a", "prod", replace(0, "100", true)), ErrorCode.CONFLICT);
+		assertThat(jdbc.queryForObject("select count(*) from policy_snapshots", Integer.class)).isZero();
+	}
+
+	@Test
+	void contextCaptureRejectsProjectArchivedAfterItWasLoaded() {
+		assertArchivedProjectIsRejected(() -> contexts.capture(key("prod"), "prod", "request-after-archive", null), ErrorCode.FORBIDDEN);
+		assertThat(jdbc.queryForObject("select count(*) from policy_request_contexts", Integer.class)).isZero();
+	}
+
+	private void assertArchivedProjectIsRejected(Runnable action, ErrorCode expected) {
+		TransactionTemplate caller = new TransactionTemplate(transactions);
+		caller.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+		caller.executeWithoutResult(status -> {
+			Project cached = projects.findById("project-a").orElseThrow();
+			TransactionTemplate archive = new TransactionTemplate(transactions);
+			archive.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+			archive.executeWithoutResult(other -> {
+				Project project = projects.findById("project-a").orElseThrow();
+				project.setStatus(ProjectStatus.ARCHIVED);
+				projects.saveAndFlush(project);
+			});
+			// A separate transaction committed ARCHIVED, but this persistence context still contains ACTIVE.
+			assertThat(cached.getStatus()).isEqualTo(ProjectStatus.ACTIVE);
+			assertThatThrownBy(action::run).isInstanceOfSatisfying(ApiException.class,
+				e -> assertThat(e.getErrorCode()).isEqualTo(expected));
+			status.setRollbackOnly();
+		});
+	}
+
+	@Test
+	void requestSoftLimitAboveHardLimitIsRejectedWithoutChangingAnExistingPolicy() throws Exception {
+		var before = policies.replace(admin, "project-a", "prod", replace(0, "100", true));
+		mvc.perform(put(path()).header("Authorization", "Bearer " + token).contentType(MediaType.APPLICATION_JSON)
+			.content(body(1).replace("\"requestSoftLimitUsd\":0.5", "\"requestSoftLimitUsd\":1.000001")))
+			.andExpect(status().isBadRequest());
+		assertThat(policies.current(admin, "project-a", "prod").snapshotId()).isEqualTo(before.snapshotId());
 		assertThat(jdbc.queryForObject("select count(*) from policy_snapshots", Integer.class)).isEqualTo(1);
 	}
 
@@ -269,7 +316,7 @@ class PolicyIntegrationTest {
 	}
 
 	private AuthenticatedProjectApiKey key(String env) { return new AuthenticatedProjectApiKey("default-org", "project-a", "key-a", env); }
-	private PolicyRequests.Replace replace(long expected, String hard, boolean active) {
+	PolicyRequests.Replace replace(long expected, String hard, boolean active) {
 		return new PolicyRequests.Replace(expected, new PolicyRules("USD", null, new BigDecimal(hard),
 			new BigDecimal("0.5"), BigDecimal.ONE, active, List.of(80, 100)), "Approved change");
 	}

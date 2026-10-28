@@ -6,6 +6,7 @@ import java.time.LocalDateTime;
 import java.time.YearMonth;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.tokenledgercloud.api.domain.budget.dto.BudgetSummaryResponse;
@@ -35,7 +36,7 @@ public class BudgetService {
 	private final ProjectRepository projectRepository;
 	private final CustomerPolicyRepository policyRepository;
 
-	@Transactional
+	@Transactional(isolation = Isolation.READ_COMMITTED)
 	public BudgetUpsertResponse upsert(BudgetUpsertRequest request) {
 		if (request.projectId() != null) {
 			// Use the same project lock as versioned writes; a racing legacy write cannot erase an audited policy.
@@ -57,6 +58,10 @@ public class BudgetService {
 				.build()
 			);
 
+		// Legacy collation can match a different spelling than the binary policy scope (e.g. PROD -> prod).
+		if (budget.getPolicyVersion() != null) {
+			throw new ApiException(ErrorCode.CONFLICT, "This budget is managed by the versioned policy API.");
+		}
 		budget.setLimitUsd(request.limitUsd());
 		budgetCalculator.applyThresholds(budget, request.thresholds());
 

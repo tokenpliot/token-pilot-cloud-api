@@ -5,6 +5,7 @@ import java.util.Objects;
 import java.util.stream.Stream;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.tokenledgercloud.api.domain.accounting.snapshot.PricingSnapshot;
@@ -14,6 +15,8 @@ import com.tokenledgercloud.api.domain.project.entity.ProjectStatus;
 import com.tokenledgercloud.api.domain.project.repository.ProjectRepository;
 import com.tokenledgercloud.api.global.exception.ApiException;
 import com.tokenledgercloud.api.global.exception.ErrorCode;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import lombok.RequiredArgsConstructor;
 
 @Service
@@ -25,9 +28,10 @@ public class PolicyContextService {
 	private final PolicySnapshotRepository snapshots;
 	private final PricingSnapshotRepository prices;
 	private final PolicyRequestContextRepository contexts;
+	private final EntityManager entityManager;
 
 	/** Server-side integration seam for #15. Never accept these snapshot IDs directly from an SDK payload. */
-	@Transactional
+	@Transactional(isolation = Isolation.READ_COMMITTED)
 	public ContextView capture(AuthenticatedProjectApiKey key, String environment, String requestId, String pricingSnapshotId) {
 		validateRequest(environment, requestId);
 		if (key == null || key.apiKeyId() == null) throw new ApiException(ErrorCode.UNAUTHORIZED);
@@ -36,6 +40,9 @@ public class PolicyContextService {
 		}
 		var project = projects.lockByIdAndOrganizationId(key.projectId(), key.organizationId())
 			.orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND));
+		// The caller may already have loaded this project into the persistence context during authentication.
+		entityManager.refresh(project, LockModeType.PESSIMISTIC_WRITE);
+		if (!key.organizationId().equals(project.getOrganizationId())) throw new ApiException(ErrorCode.NOT_FOUND);
 		if (project.getStatus() != ProjectStatus.ACTIVE) throw new ApiException(ErrorCode.FORBIDDEN);
 		var existing = contexts.findByOrganizationIdAndProjectIdAndEnvironmentAndRequestId(
 			key.organizationId(), key.projectId(), environment, requestId);

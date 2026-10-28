@@ -4,6 +4,8 @@
 
 Phase 1의 `policy_snapshots`/`monthly_budget_settings` 계약을 실행 가능한 관리 API로 확장한다. #14는 정책 저장·버전·변경 감사·복구와 요청별 정책/가격 참조 보존을 담당한다. 판정 알고리즘/Advisory HTTP API(#15), Shadow 실행·예상 거부율(#16), 원자적 예약(#17), opt-in Enforce/break-glass(#18/#19)는 구현하지 않는다. 오픈소스 `tokenpilot`과 Client SDK는 수정하지 않는다. 조직→팀→사용자 계층 정책은 지원하지 않는다.
 
+#14의 완료 기준 중 **실제 요청을 당시 정책·가격 버전으로 설명하는 경로는 아직 미완료**다. 내부 capture와 조회 기능은 준비했지만 운영 요청 경로에 연결되어 있지 않다. PR은 `Refs #14`로 연결하고 이슈를 자동 종료하지 않는다. #15 연동 후 실제 HTTP 요청 → context 저장 → 정책·가격 변경 → 동일 요청의 과거 버전 조회를 검증해야 이 기준을 완료할 수 있다.
+
 ## 정책과 한도
 
 - 하나의 `(organization, project, environment)`에 stable UUID `policyId`가 있다. environment 생략은 프로젝트 전체 범위다. 빈 문자열은 API에서 거부하고 저장 키에서만 프로젝트 범위로 사용한다. 구체 환경은 프로젝트에 등록된 이름과 대소문자까지 일치해야 한다.
@@ -25,7 +27,9 @@ Phase 1의 `policy_snapshots`/`monthly_budget_settings` 계약을 실행 가능�
 
 ## 변경 원자성과 동시성
 
-`projects`의 해당 행을 SELECT FOR UPDATE한 뒤 head 조회도 locking read로 수행한다. MySQL REPEATABLE READ에서 인증 단계의 이전 read view 때문에 최신 revision을 놓치지 않는다. `expectedVersion=0`은 최초 생성에만, 이후에는 현재 revision과 일치할 때만 허용한다. 같은 revision에 대한 두 변경 중 하나만 성공하고 나머지는 409다.
+정책 생성·수정·import·rollback, v0 예산 쓰기, context capture는 `READ_COMMITTED` 트랜잭션으로 실행한다. `projects`의 해당 행을 SELECT FOR UPDATE한 뒤 head 조회도 locking read로 수행한다. 같은 프로젝트의 쓰기는 프로젝트 행 잠금으로 직렬화하고, 다른 프로젝트의 최초 생성은 존재하지 않는 head/예산 행의 gap lock 때문에 서로 교착되지 않게 한다. 상위 트랜잭션에서 이 서비스를 호출하는 후속 연동도 `READ_COMMITTED`를 사용해야 한다(Spring REQUIRED는 기존 트랜잭션의 격리 수준을 바꾸지 않는다).
+
+관리 쓰기와 context capture는 프로젝트를 `refresh(..., PESSIMISTIC_WRITE)`하여 이미 영속성 컨텍스트에 로드된 상태도 갱신한다. 인증 후 다른 트랜잭션이 프로젝트를 보관 처리했다면 오래된 ACTIVE 상태로 진행하지 않는다. `expectedVersion=0`은 최초 생성에만, 이후에는 현재 revision과 일치할 때만 허용한다. 같은 revision에 대한 두 변경 중 하나만 성공하고 나머지는 409다.
 
 head 변경, 불변 snapshot INSERT, 월 예산 projection 갱신을 **한 트랜잭션**으로 커밋한다. 중복 legacy 예산이 있으면 임의의 첫 행을 선택하지 않고 409로 중단한다. 프로젝트 공통 정책과 환경 정책도 같은 프로젝트 잠금으로 직렬화한다. 요청 context capture도 같은 잠금을 사용해 한 순간의 두 정책을 묶는다. 파일럿 규모의 정확성을 우선한 잠금이며 고처리량 판정 서비스의 성능은 #15/#17에서 측정한다.
 
@@ -52,7 +56,7 @@ head 변경, 불변 snapshot INSERT, 월 예산 projection 갱신을 **한 트�
 | 경로/데이터 | 동작 |
 | --- | --- |
 | v0 `PUT /api/budgets`, 미전환 범위 | 기존 입력/응답과 변경 방식 유지 |
-| v0 `PUT /api/budgets`, 전환한 동일 범위 | 409: 버전 API 사용. 감사 우회 덮어쓰기를 허용하지 않음 |
+| v0 `PUT /api/budgets`, 전환한 동일 범위 | 409: 버전 API 사용. 실제 조회된 예산의 policy_version도 검사해 legacy collation이 PROD/PrOd를 prod로 매칭해도 감사 우회를 차단 |
 | v0 summary/dashboard | 기존 응답 형태, monthly hard 한도와 알림 projection 유지. soft/request/active를 표현하지 않으므로 정책 판정에 사용 금지 |
 | 새 `PUT /api/policies/projects/{id}` | 완전 교체, 새 revision과 actor/time/reason 반환 |
 | `POST .../import-monthly-budget` | 정확히 같은 프로젝트/환경의 단일 legacy budget을 v1로 복사. soft/request 한도는 null. 알림 flags 유지 |

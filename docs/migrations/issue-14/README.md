@@ -7,7 +7,7 @@
 3. `organization_members`에서 실제 고객 관리자/조회자를 확인한다. OWNER/ADMIN은 쓰기, OPERATOR/VIEWER는 읽기다. 멤버십이 없는 사용자를 일괄 관리자 승격하지 않는다.
 4. V7 적용: customer_policies 및 policy_request_contexts 생성, 기존 policy_snapshots에 nullable 출처/이력 컬럼과 FK/UNIQUE/CHECK 추가. 기존 snapshot ID와 usage FK를 보존한다. 환경/request ID는 대소문자를 구분한다.
 5. 새 서버 배포 후 소수의 검증된 프로젝트/환경에 `import-monthly-budget` 호출. 기존 알림 임계값을 soft limit으로 추정하지 않는다. 응답 policyId/version/snapshotId/actorId와 legacy projection(policy_version)을 확인한다.
-6. 새 API 수정/이력/rollback과 v0의 전환 범위 쓰기 409를 점검한다. 전체 서비스 쓰기 배포가 끝나기 전에 이관하면 구버전 인스턴스가 audit 없이 monthly_budget_settings를 변경할 수 있으므로 **구버전 writer를 먼저 배제**한다.
+6. 새 API 수정/이력/rollback과 v0의 전환 범위 쓰기 409를 점검한다. prod를 이관했다면 PROD/PrOd 요청도 409인지 확인한다. 전체 서비스 쓰기 배포가 끝나기 전에 이관하면 구버전 인스턴스가 audit 없이 monthly_budget_settings를 변경할 수 있으므로 **구버전 writer를 먼저 배제**한다.
 7. #15 연동 시 request context를 기존 snapshot 참조로 저장하고, 원본 입력 fingerprint/월 누적값/알고리즘 버전은 해당 판정 감사에 함께 남긴다.
 
 ## 애플리케이션 rollback
@@ -29,4 +29,4 @@ POLICY_TEST_MYSQL_USER=root \
 ./gradlew test --tests '*PolicyMySqlIntegrationTest'
 ```
 
-비밀번호가 필요하면 POLICY_TEST_MYSQL_PASSWORD 환경변수로 전달한다. 해당 URL이 없으면 MySQL suite는 skip한다. Flyway V1~V7와 실제 REPEATABLE READ에서 초기 생성/동시 갱신·불변 이력·가격 연결·HTTP 권한을 같은 suite로 검증한다. ddl-auto는 운영과 같은 none이다. 기존 pricing_catalogs.generated_yaml의 LOB 매핑이 Hibernate validate와 맞지 않는 문제는 #14 범위 밖이므로 변경하지 않는다.
+비밀번호가 필요하면 POLICY_TEST_MYSQL_PASSWORD 환경변수로 전달한다. 해당 URL이 없으면 MySQL suite는 skip한다. Flyway V1~V7를 사용하며 pool 기본값은 REPEATABLE READ, 정책/예산 쓰기와 capture의 트랜잭션은 READ COMMITTED다. 초기 생성/동시 갱신·불변 이력·가격 연결·HTTP 권한과 함께 대소문자 예산 우회, 이미 로드된 프로젝트의 보관 처리, 서로 다른 프로젝트의 동시 최초 생성을 검증한다. 동시 생성 테스트는 양쪽의 실제 head/예산 조회를 동기화해 존재하지 않는 행을 모두 조회한 후 INSERT하도록 만든다. ddl-auto는 운영과 같은 none이다. 기존 pricing_catalogs.generated_yaml의 LOB 매핑이 Hibernate validate와 맞지 않는 문제는 #14 범위 밖이므로 변경하지 않는다.

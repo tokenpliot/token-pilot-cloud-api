@@ -15,6 +15,8 @@ import com.tokenledgercloud.api.domain.project.entity.ProjectStatus;
 import com.tokenledgercloud.api.domain.project.repository.ProjectRepository;
 import com.tokenledgercloud.api.global.exception.ApiException;
 import com.tokenledgercloud.api.global.exception.ErrorCode;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import lombok.RequiredArgsConstructor;
 
 @Component
@@ -23,6 +25,7 @@ public class PolicyAccess {
 	private final MemberRepository members;
 	private final OrganizationMembershipRepository memberships;
 	private final ProjectRepository projects;
+	private final EntityManager entityManager;
 
 	public Grant authorize(Authentication authentication, String projectId, boolean write) {
 		Member member = member(authentication);
@@ -36,7 +39,10 @@ public class PolicyAccess {
 		}
 		if (write) {
 			// One lock serializes creation, revision changes, legacy imports and request-context capture.
-			project = projects.lockByIdAndOrganizationId(projectId, project.getOrganizationId()).orElseThrow(PolicyAccess::hidden);
+			String organizationId = project.getOrganizationId();
+			// A locking query alone reuses the managed entity loaded above; refresh also reloads its status.
+			entityManager.refresh(project, LockModeType.PESSIMISTIC_WRITE);
+			if (!organizationId.equals(project.getOrganizationId())) throw hidden();
 			if (project.getStatus() != ProjectStatus.ACTIVE) {
 				throw new ApiException(ErrorCode.CONFLICT, "Only active projects can change policies.");
 			}

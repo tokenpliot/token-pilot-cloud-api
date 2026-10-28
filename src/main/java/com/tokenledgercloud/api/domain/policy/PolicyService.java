@@ -6,6 +6,7 @@ import java.util.Objects;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.tokenledgercloud.api.domain.budget.entity.MonthlyBudgetSetting;
@@ -28,37 +29,28 @@ public class PolicyService {
 	private final BudgetCalculator budgetCalculator;
 	private final ProjectEnvironmentRepository environments;
 
-	@Transactional
+	@Transactional(isolation = Isolation.READ_COMMITTED)
 	public PolicyVersionView replace(Authentication auth, String projectId, String environment, PolicyRequests.Replace request) {
-		var grant = access.authorize(auth, projectId, true);
-		validateScope(grant.project(), environment);
-		CustomerPolicy policy = policy(grant.project(), environment, true);
-		expected(policy, request.expectedVersion());
-		return append(grant, policy, request.rules(), request.reason(), policy.getCurrentVersion() == 0 ? "CREATE" : "REPLACE", null);
+		var write = prepareWrite(auth, projectId, environment, request.expectedVersion());
+		return append(write.grant(), write.policy(), request.rules(), request.reason(),
+			write.policy().getCurrentVersion() == 0 ? PolicyChangeType.CREATE : PolicyChangeType.REPLACE, null);
 	}
 
-	@Transactional
+	@Transactional(isolation = Isolation.READ_COMMITTED)
 	public PolicyVersionView importBudget(Authentication auth, String projectId, String environment, PolicyRequests.ImportBudget request) {
-		var grant = access.authorize(auth, projectId, true);
-		validateScope(grant.project(), environment);
-		CustomerPolicy policy = policy(grant.project(), environment, true);
-		expected(policy, 0L);
-		MonthlyBudgetSetting budget = existingBudget(policy);
+		var write = prepareWrite(auth, projectId, environment, 0L);
+		MonthlyBudgetSetting budget = existingBudget(write.policy());
 		if (budget == null) throw new ApiException(ErrorCode.BUDGET_NOT_FOUND);
 		// Legacy notification thresholds are NOT soft limits and import never enables enforcement.
 		PolicyRules rules = new PolicyRules("USD", null, budget.getLimitUsd(), null, null, true, budgetCalculator.toThresholds(budget));
-		return append(grant, policy, rules, request.reason(), "IMPORT_LEGACY", null);
+		return append(write.grant(), write.policy(), rules, request.reason(), PolicyChangeType.IMPORT_LEGACY, null);
 	}
 
-	@Transactional
+	@Transactional(isolation = Isolation.READ_COMMITTED)
 	public PolicyVersionView rollback(Authentication auth, String projectId, String environment, PolicyRequests.Rollback request) {
-		var grant = access.authorize(auth, projectId, true);
-		// Historical scopes remain readable; a restore still needs a currently registered environment.
-		validateScope(grant.project(), environment);
-		CustomerPolicy policy = policy(grant.project(), environment, true);
-		expected(policy, request.expectedVersion());
-		PolicySnapshot restored = version(policy, request.restoreVersion());
-		return append(grant, policy, restored.rules(), request.reason(), "ROLLBACK", restored.getRevision());
+		var write = prepareWrite(auth, projectId, environment, request.expectedVersion());
+		PolicySnapshot restored = version(write.policy(), request.restoreVersion());
+		return append(write.grant(), write.policy(), restored.rules(), request.reason(), PolicyChangeType.ROLLBACK, restored.getRevision());
 	}
 
 	@Transactional(readOnly = true)
@@ -98,8 +90,19 @@ public class PolicyService {
 			"New requests use the new revision. Captured requests retain their snapshots. No automatic enforcement.");
 	}
 
+	private WritePreparation prepareWrite(Authentication auth, String projectId, String environment, Long expectedVersion) {
+		var grant = access.authorize(auth, projectId, true);
+		// Historical scopes remain readable; every write, including a restore, needs a registered environment.
+		validateScope(grant.project(), environment);
+		CustomerPolicy policy = policy(grant.project(), environment, true);
+		expected(policy, expectedVersion);
+		return new WritePreparation(grant, policy);
+	}
+
+	private record WritePreparation(PolicyAccess.Grant grant, CustomerPolicy policy) {}
+
 	private PolicyVersionView append(PolicyAccess.Grant grant, CustomerPolicy policy, PolicyRules rules,
-		String reason, String changeType, Long restoredFrom) {
+		String reason, PolicyChangeType changeType, Long restoredFrom) {
 		if (rules == null || reason == null || reason.isBlank() || reason.length() > 500) throw new ApiException(ErrorCode.INVALID_INPUT);
 		MonthlyBudgetSetting budget = existingBudget(policy);
 		String sourceBudgetId = budget == null ? null : budget.getId();
@@ -132,7 +135,7 @@ public class PolicyService {
 
 	private CustomerPolicy policy(Project project, String environment, boolean lock) {
 		validateEnvironment(environment);
-		// Locking reads see committed state under MySQL REPEATABLE READ even after membership reads.
+		// Project locks serialize same-project writes; READ COMMITTED avoids gaps locking other projects' first inserts.
 		return (lock ? policies.lockByScope(project.getOrganizationId(), project.getId(), key(environment))
 			: policies.findByOrganizationIdAndProjectIdAndEnvironmentKey(project.getOrganizationId(), project.getId(), key(environment)))
 			.orElseGet(() -> CustomerPolicy.create(project.getOrganizationId(), project.getId(), environment));
