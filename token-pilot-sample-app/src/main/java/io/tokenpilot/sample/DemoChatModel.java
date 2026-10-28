@@ -52,8 +52,10 @@ public final class DemoChatModel implements ChatModel {
             }
         }
 
+        // 요청한 모델명을 그대로 응답 모델로 돌려준다. (observe 프로필의 가격 누락 검증용, 기본값은 기존과 같음)
+        String requestedModel = prompt.getOptions() != null ? prompt.getOptions().getModel() : null;
         ChatResponseMetadata.Builder metadata = ChatResponseMetadata.builder()
-                .model("gpt-4o-2024-08-06");
+                .model(requestedModel != null && !requestedModel.isBlank() ? requestedModel : "gpt-4o-2024-08-06");
         if (usageAvailable) {
             metadata.usage(DEFAULT_USAGE);
         }

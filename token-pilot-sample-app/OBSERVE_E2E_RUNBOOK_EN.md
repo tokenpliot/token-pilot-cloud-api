@@ -53,7 +53,7 @@ cd token-pilot-cloud-api/token-pilot-sample-app
 
 | Test | What it verifies |
 |---|---|
-| `ObserveProfileE2ETest.ObserveProfile` | boots the real `observe` profile → 3 calls → 3 events with real usage (8/3) at a fake ingestion server, no prompt text, local cost total |
+| `ObserveProfileE2ETest.ObserveProfile` | boots the real `observe` profile → 3 calls → 3 events with real usage (8/3) at a fake ingestion server, no prompt text, local cost total; requested model forwarded (missing-price check), unlisted models rejected |
 | `ObserveProfileE2ETest.DemoProfileKnownGap` | the `demo` profile (budget on) currently forwards nothing (pins the section 5 limitation; fails once the SDK is fixed, then update it) |
 | `ObservePilotE2ETest` | SDK auto-configuration: v2 path, only listed tags, unpriced/model-mismatch metadata, retry after 503, 401 (revoked key) dropped without retry, provider unaffected when the server is down |
 | `DemoScenarioE2ETest` | `demo` profile HTTP contract |
@@ -149,6 +149,7 @@ Verification endpoints:
 | Endpoint | Behaviour |
 |---|---|
 | `GET /test/token-pilot/observe/call?count=N` | calls the fake provider N times (1–20); each call's usage is sent by the SDK |
+| `GET /test/token-pilot/observe/call?count=N&model=gpt-4o-mini-2024-07-18` | calls with a model the server has no price for (missing-price check). Only these two models are allowed |
 | `GET /test/token-pilot/observe/stats` | reads current stats without creating events |
 | `GET /test/token-pilot/observe/stats?flush=true` | waits until the SDK queue drains (up to 5 s), then reads stats |
 
@@ -204,6 +205,24 @@ Reconciliation criteria (first run on a fresh MySQL container):
 
 Cost per call: 8 × 0.00015/1K + 3 × 0.00060/1K = **0.000003 USD**. The ledger is cumulative; to reconcile again,
 recreate the container or compare before/after differences.
+
+#### Missing price (UNPRICED) query
+
+Call with a model the sample app can price but the server's pricing table does not have.
+
+```bash
+curl -s "http://localhost:8080/test/token-pilot/observe/call?count=1&model=gpt-4o-mini-2024-07-18"; echo
+curl -s "http://localhost:8080/test/token-pilot/observe/stats?flush=true"; echo
+
+ledger unpriced       "period=month"
+ledger spend-summary  ""
+```
+
+Expected:
+- `unpriced.items` lists `gpt-4o-mini-2024-07-18` with 1 event (server reason `PRICE_NOT_FOUND`)
+- The event is not added to `ledgerConfirmedSpentUsd`; `unreflectedEventCount` increases by 1
+  (so from here on `localCostUsd` and `ledgerConfirmedSpentUsd` differ by this call)
+- `ingestion-lag.unsettledCount` and `reconciliation.unpricedEventCount` also increase by 1
 
 ### 3.8. Fault injection ①: server down
 
@@ -263,6 +282,7 @@ unset DB_PASSWORD JWT_SECRET TP_API_KEY TP_API_KEY_HASH TP_LEDGER_JWT
 | 2 calls after server restart | `created` +2 | `eventCount=11` |
 | 2 calls with revoked key | `providerAnswered=2`, `REQUEST_REFUSED=2`, `retried` unchanged | `eventCount=11` unchanged |
 | 1 call after restoring key | `created` +1 | `eventCount=12`, `0.000036` |
+| (fresh container) 2 normal calls + 1 unpriced-model call | `created=3`, `localCostUsd=0.000009` | `eventCount=3`, `ledgerConfirmedSpentUsd=0.000006`, `unreflectedEventCount=1`, `unpriced.items=[gpt-4o-mini-2024-07-18, 1 event]` |
 
 ## 5. Current limitations
 

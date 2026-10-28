@@ -10,6 +10,12 @@ token-pilot:
         rates:
           PROMPT: 0.00015
           COMPLETION: 0.00060
+      # 서버에는 가격표를 등록하지 않는 모델. 중앙 원장의 가격 누락(UNPRICED) 조회 검증용
+      - model-id: gpt-4o-mini-2024-07-18
+        currency: USD
+        rates:
+          PROMPT: 0.00015
+          COMPLETION: 0.00060
   spring-ai:
     default-model-id: gpt-4o-2024-08-06
   budget:

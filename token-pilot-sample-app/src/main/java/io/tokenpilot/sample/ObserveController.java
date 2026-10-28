@@ -13,6 +13,7 @@ import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /** 이슈 #13 Observe E2E 검증용 HTTP API. {@code observe} 프로필에서만 열린다. */
@@ -21,6 +22,8 @@ import java.util.UUID;
 public class ObserveController {
 
     private static final String MODEL_ID = "gpt-4o-2024-08-06";
+    // 두 번째 모델은 서버에 가격표를 등록하지 않아 중앙 원장에서 UNPRICED로 남는지 확인하는 용도
+    private static final Set<String> ALLOWED_MODELS = Set.of(MODEL_ID, "gpt-4o-mini-2024-07-18");
     private static final int MAX_CALLS = 20;
     private static final Duration FLUSH_TIMEOUT = Duration.ofSeconds(5);
 
@@ -38,11 +41,20 @@ public class ObserveController {
         this.tokenPilotClient = tokenPilotClient;
     }
 
-    /** 가짜 provider를 {@code count}번 호출한다. 각 호출의 실제 사용량이 SDK를 통해 중앙으로 전송된다. */
+    /**
+     * 가짜 provider를 {@code count}번 호출한다. 각 호출의 실제 사용량이 SDK를 통해 중앙으로 전송된다.
+     * {@code model}은 application-observe.yml에 가격이 있는 모델만 쓸 수 있다.
+     */
     @GetMapping("/test/token-pilot/observe/call")
-    public Map<String, Object> call(@RequestParam(defaultValue = "1") int count) {
+    public Map<String, Object> call(
+            @RequestParam(defaultValue = "1") int count,
+            @RequestParam(defaultValue = MODEL_ID) String model
+    ) {
         if (count < 1 || count > MAX_CALLS) {
             throw new IllegalArgumentException("count must be between 1 and " + MAX_CALLS);
+        }
+        if (!ALLOWED_MODELS.contains(model)) {
+            throw new IllegalArgumentException("model must be one of " + ALLOWED_MODELS);
         }
         ChatClient chatClient = chatClientBuilder.clone().build();
         int answered = 0;
@@ -50,7 +62,7 @@ public class ObserveController {
             String requestId = "observe-" + UUID.randomUUID();
             String answer = chatClient.prompt()
                     .user("Observe E2E request")
-                    .options(ChatOptions.builder().model(MODEL_ID).maxTokens(16))
+                    .options(ChatOptions.builder().model(model).maxTokens(16))
                     .advisors(advisors -> advisors
                             .param("tokenpilot.request.id", requestId)
                             .param("tenant_id", "observe-tenant")

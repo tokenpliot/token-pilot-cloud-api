@@ -52,7 +52,7 @@ cd token-pilot-cloud-api/token-pilot-sample-app
 
 | 테스트 | 검증 내용 |
 |---|---|
-| `ObserveProfileE2ETest.ObserveProfile` | `observe` 프로필 실제 기동 → 3회 호출 → 가짜 수집 서버에 실제 사용량(8/3) 이벤트 3건, 프롬프트 원문 미포함, 로컬 비용 합계 |
+| `ObserveProfileE2ETest.ObserveProfile` | `observe` 프로필 실제 기동 → 3회 호출 → 가짜 수집 서버에 실제 사용량(8/3) 이벤트 3건, 프롬프트 원문 미포함, 로컬 비용 합계. 요청 모델 전달(가격 누락 검증용), 허용 외 모델 거부 |
 | `ObserveProfileE2ETest.DemoProfileKnownGap` | `demo` 프로필(예산 켜짐)은 현재 SDK로 0건 전송됨 (5장 제약을 고정. SDK가 고쳐지면 실패하므로 그때 갱신) |
 | `ObservePilotE2ETest` | SDK 자동 구성 단위: v2 경로, 지정 태그만 전송, 가격 없는 모델·모델 불일치 메타데이터, 503 후 재시도, 401(폐기 키) 재시도 없이 버림, 서버 다운 시 provider 결과 불변 |
 | `DemoScenarioE2ETest` | `demo` 프로필 HTTP 계약 |
@@ -147,6 +147,7 @@ cd token-pilot-cloud-api/token-pilot-sample-app
 | endpoint | 동작 |
 |---|---|
 | `GET /test/token-pilot/observe/call?count=N` | 가짜 provider를 N번(1~20) 호출. 각 호출의 사용량이 SDK로 전송됨 |
+| `GET /test/token-pilot/observe/call?count=N&model=gpt-4o-mini-2024-07-18` | 서버에 가격표가 없는 모델로 호출 (가격 누락 검증용). 허용 모델은 이 둘뿐 |
 | `GET /test/token-pilot/observe/stats` | 이벤트를 만들지 않고 현재 통계만 조회 |
 | `GET /test/token-pilot/observe/stats?flush=true` | SDK 큐가 빌 때까지(최대 5초) 기다린 뒤 조회 |
 
@@ -202,6 +203,24 @@ ledger reconciliation "period=month"   # UNPRICED / RECONCILIATION_REQUIRED 건�
 
 호출당 비용: 8 × 0.00015/1K + 3 × 0.00060/1K = **0.000003 USD**. 원장은 누적값이므로 다시 대조할 때는
 컨테이너를 새로 만들거나 전후 차이로 비교합니다.
+
+#### 가격 누락(UNPRICED) 조회
+
+샘플 앱은 가격을 알지만 서버 가격표에는 없는 모델로 호출합니다.
+
+```bash
+curl -s "http://localhost:8080/test/token-pilot/observe/call?count=1&model=gpt-4o-mini-2024-07-18"; echo
+curl -s "http://localhost:8080/test/token-pilot/observe/stats?flush=true"; echo
+
+ledger unpriced       "period=month"
+ledger spend-summary  ""
+```
+
+기대 결과:
+- `unpriced.items`에 `gpt-4o-mini-2024-07-18` 1건 (서버 사유 `PRICE_NOT_FOUND`)
+- 이 이벤트는 `ledgerConfirmedSpentUsd`에 더해지지 않고 `unreflectedEventCount`가 1 증가
+  (그래서 이 단계 이후에는 `localCostUsd`와 `ledgerConfirmedSpentUsd`가 이 호출분만큼 차이 남)
+- `ingestion-lag.unsettledCount`, `reconciliation.unpricedEventCount`도 1 증가
 
 ### 3.8. 장애 주입 ①: 서버 다운
 
@@ -261,6 +280,7 @@ unset DB_PASSWORD JWT_SECRET TP_API_KEY TP_API_KEY_HASH TP_LEDGER_JWT
 | 서버 재기동 후 2회 | `created` +2 | `eventCount=11` |
 | 키 폐기 2회 | `providerAnswered=2`, `REQUEST_REFUSED=2`, `retried` 변화 없음 | `eventCount=11` 유지 |
 | 키 복구 후 1회 | `created` +1 | `eventCount=12`, `0.000036` |
+| (새 컨테이너) 정상 2회 + 가격 없는 모델 1회 | `created=3`, `localCostUsd=0.000009` | `eventCount=3`, `ledgerConfirmedSpentUsd=0.000006`, `unreflectedEventCount=1`, `unpriced.items=[gpt-4o-mini-2024-07-18 1건]` |
 
 ## 5. 현재 제약
 

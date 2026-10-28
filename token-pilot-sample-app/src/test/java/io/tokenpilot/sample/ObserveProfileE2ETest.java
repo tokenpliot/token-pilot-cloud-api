@@ -113,6 +113,26 @@ class ObserveProfileE2ETest {
                     .contains("\"scenario\":\"observe-e2e\"")
                     .doesNotContain("Observe E2E request"));
         }
+
+        @Test
+        void requestedModelIsForwardedSoServerCanFlagMissingPrice() throws Exception {
+            BODIES.clear();
+
+            HttpResponse<String> call = get(port, "/test/token-pilot/observe/call?count=1&model=gpt-4o-mini-2024-07-18");
+            get(port, "/test/token-pilot/observe/stats?flush=true");
+
+            assertThat(call.body()).contains("\"providerAnswered\":1");
+            assertThat(BODIES).singleElement().satisfies(body -> assertThat(body)
+                    .contains("\"model\":\"gpt-4o-mini-2024-07-18\"")
+                    .contains("\"promptTokens\":8"));
+        }
+
+        @Test
+        void unlistedModelIsRejectedBeforeProviderCall() throws Exception {
+            HttpResponse<String> call = get(port, "/test/token-pilot/observe/call?model=unknown-model");
+
+            assertThat(call.statusCode()).isGreaterThanOrEqualTo(400);
+        }
     }
 
     /**
