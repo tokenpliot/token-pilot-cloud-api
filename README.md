@@ -2,7 +2,6 @@
 ---
 ## Demo
 - 🌐 Frontend: https://token-ledger-cloud-front.vercel.app
-- ⚙️ Backend API: http://52.78.69.13:8080  
 - 🧩 Frontend Repository: https://github.com/token-ledger/token-ledger-cloud-front
 ---
 ## Architecture
@@ -80,13 +79,7 @@ ___
 docker build -t token-ledger-cloud-api .
 docker run -d -p 8080:8080 token-ledger-cloud-api
 
-### Database (RDS)
 
-Host: token-ai-ledger-db.crumy8a0eyuf.ap-northeast-2.rds.amazonaws.com
-Port: 3306
-DB: token_ledger
-
-___
 
 ### Tech Stack
 
