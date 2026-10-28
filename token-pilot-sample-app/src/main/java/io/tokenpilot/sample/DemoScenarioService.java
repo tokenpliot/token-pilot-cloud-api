@@ -12,6 +12,9 @@ import io.tokenpilot.budget.BudgetSnapshot;
 import io.tokenpilot.budget.IdempotencyKey;
 import io.tokenpilot.budget.ReservationState;
 import io.tokenpilot.budget.ReservationTransition;
+import io.tokenpilot.client.ClientStats;
+import io.tokenpilot.client.DropReason;
+import io.tokenpilot.client.TokenPilotClient;
 import io.tokenpilot.core.ModelRegistry;
 import io.tokenpilot.core.TokenBudget;
 import io.tokenpilot.core.TokenEstimator;
@@ -66,7 +69,7 @@ public class DemoScenarioService {
     private final TokenBudget tokenBudget;
     private final TokenPilotProperties properties;
     private final MeterRegistry meterRegistry;
-    private final Optional<ObserveLedgerListener> observeLedgerListener;
+    private final Optional<TokenPilotClient> tokenPilotClient;
     private final AtomicInteger runSequence = new AtomicInteger();
 
     @Autowired
@@ -80,7 +83,7 @@ public class DemoScenarioService {
             TokenBudget tokenBudget,
             TokenPilotProperties properties,
             MeterRegistry meterRegistry,
-            Optional<ObserveLedgerListener> observeLedgerListener
+            Optional<TokenPilotClient> tokenPilotClient
     ) {
         this.chatClientBuilder = chatClientBuilder;
         this.demoChatModel = demoChatModel;
@@ -91,7 +94,7 @@ public class DemoScenarioService {
         this.tokenBudget = tokenBudget;
         this.properties = properties;
         this.meterRegistry = meterRegistry;
-        this.observeLedgerListener = observeLedgerListener;
+        this.tokenPilotClient = tokenPilotClient;
     }
 
     public synchronized DemoRunReport runAll() {
@@ -106,8 +109,6 @@ public class DemoScenarioService {
                 reconciliation(runId, ReconciliationMode.PROVIDER_FAILURE),
                 reconciliation(runId, ReconciliationMode.USAGE_UNKNOWN)
         );
-        // 배치 부분 실패(정상 1건 + 검증 실패 1건) E2E 시나리오 전송
-        observeLedgerListener.ifPresent(listener -> listener.sendBatchPartialFailureDemo(MODEL_ID));
 
         return new DemoRunReport(
                 runId,
@@ -119,37 +120,15 @@ public class DemoScenarioService {
         );
     }
 
-    public synchronized DemoScenarioResult contextFit() {
-        return contextFit(nextRunId());
-    }
-
-    public synchronized DemoScenarioResult contextBlock() {
-        return contextBlock(nextRunId());
-    }
-
-    public synchronized DemoScenarioResult budgetConcurrency() {
-        return budgetConcurrency(nextRunId());
-    }
-
-    public synchronized DemoScenarioResult idempotency() {
-        return idempotency(nextRunId());
-    }
-
-    public synchronized DemoScenarioResult release() {
-        return release(nextRunId());
-    }
-
-    public synchronized DemoScenarioResult reconciliationSuccess() {
-        return reconciliation(nextRunId(), ReconciliationMode.SUCCESS);
-    }
-
-    public synchronized DemoScenarioResult reconciliationFailure() {
-        return reconciliation(nextRunId(), ReconciliationMode.PROVIDER_FAILURE);
-    }
-
-    public synchronized DemoScenarioResult reconciliationUnknown() {
-        return reconciliation(nextRunId(), ReconciliationMode.USAGE_UNKNOWN);
-    }
+    public synchronized DemoScenarioResult contextFit() { return contextFit(nextRunId()); }
+    public synchronized DemoScenarioResult contextBlock() { return contextBlock(nextRunId()); }
+    public synchronized DemoScenarioResult budgetConcurrency() { return budgetConcurrency(nextRunId()); }
+    public synchronized DemoScenarioResult idempotency() { return idempotency(nextRunId()); }
+    public synchronized DemoScenarioResult release() { return release(nextRunId()); }
+    public synchronized DemoScenarioResult reconciliationSuccess() { return reconciliation(nextRunId(), ReconciliationMode.SUCCESS); }
+    public synchronized DemoScenarioResult reconciliationFailure() { return reconciliation(nextRunId(), ReconciliationMode.PROVIDER_FAILURE); }
+    public synchronized DemoScenarioResult reconciliationTimeout() { return reconciliation(nextRunId(), ReconciliationMode.PROVIDER_TIMEOUT); }
+    public synchronized DemoScenarioResult reconciliationUnknown() { return reconciliation(nextRunId(), ReconciliationMode.USAGE_UNKNOWN); }
 
     private DemoScenarioResult contextFit(String runId) {
         String text = "A short request stays inside the versioned model context window.";
@@ -159,14 +138,7 @@ public class DemoScenarioService {
         evidence.put("providerInvocations", 0);
         evidence.put("requestText", text);
         boolean passed = result.status() == AdmissionStatus.FITS;
-        return new DemoScenarioResult(
-                "context-fit",
-                passed ? "PASS" : "FAIL",
-                passed
-                        ? "보수적 REQUEST 상한으로 provider 호출 전 FITS를 확인했습니다."
-                        : "짧은 요청이 예상과 다르게 context admission에 실패했습니다.",
-                evidence
-        );
+        return new DemoScenarioResult("context-fit", passed ? "PASS" : "FAIL", passed ? "보수적 REQUEST 상한으로 provider 호출 전 FITS를 확인했습니다." : "짧은 요청이 예상과 다르게 context admission에 실패했습니다.", evidence);
     }
 
     private DemoScenarioResult contextBlock(String runId) {
@@ -178,19 +150,7 @@ public class DemoScenarioService {
         evidence.put("inputCharacters", text.length());
         evidence.put("requestTextIncluded", false);
         boolean passed = result.status() == AdmissionStatus.EXCEEDS;
-        if (passed) {
-            // 호출 전 실패(차단) 흐름 Observe 전송 (성공 흐름과 중복되지 않음)
-            observeLedgerListener.ifPresent(listener ->
-                    listener.sendNonSuccessFlow("context-block", MODEL_ID, "PRE_CALL_BLOCKED", "NONE"));
-        }
-        return new DemoScenarioResult(
-                "context-block",
-                passed ? "PASS" : "FAIL",
-                passed
-                        ? "보수적 safe upper bound가 context를 넘겨 provider 전에 차단했습니다."
-                        : "큰 입력이 예상과 다르게 context admission을 통과했습니다.",
-                evidence
-        );
+        return new DemoScenarioResult("context-block", passed ? "PASS" : "FAIL", passed ? "보수적 safe upper bound가 context를 넘겨 provider 전에 차단했습니다." : "큰 입력이 예상과 다르게 context admission을 통과했습니다.", evidence);
     }
 
     private DemoScenarioResult budgetConcurrency(String runId) {
@@ -203,86 +163,42 @@ public class DemoScenarioService {
             try {
                 demoChatModel.blockNextProviderCall();
                 Future<CallOutcome> primary = executor.submit(
-                        () -> invokeChat(
-                                tenant,
-                                "request-" + runId + "-primary",
-                                "attempt-" + runId + "-primary",
-                                "idempotency-" + runId + "-primary",
-                                CONCURRENCY_PROMPT,
-                                REQUEST_OUTPUT_TOKENS
-                        )
+                        () -> invokeChat(tenant, "request-" + runId + "-primary", "attempt-" + runId + "-primary", "idempotency-" + runId + "-primary", CONCURRENCY_PROMPT, REQUEST_OUTPUT_TOKENS)
                 );
                 boolean providerEntered = demoChatModel.awaitProviderEntry(5, TimeUnit.SECONDS);
-
-                if (!providerEntered) {
-                    throw new IllegalStateException("demo provider did not enter in time");
-                }
+                if (!providerEntered) throw new IllegalStateException("demo provider did not enter in time");
 
                 List<Future<CallOutcome>> competitors = new ArrayList<>();
                 for (int index = 0; index < COMPETITOR_COUNT; index++) {
                     String suffix = runId + "-competitor-" + index;
-                    competitors.add(executor.submit(
-                            () -> invokeChat(
-                                    tenant,
-                                    "request-" + suffix,
-                                    "attempt-" + suffix,
-                                    "idempotency-" + suffix,
-                                    CONCURRENCY_PROMPT,
-                                    REQUEST_OUTPUT_TOKENS
-                            )
-                    ));
+                    competitors.add(executor.submit(() -> invokeChat(tenant, "request-" + suffix, "attempt-" + suffix, "idempotency-" + suffix, CONCURRENCY_PROMPT, REQUEST_OUTPUT_TOKENS)));
                 }
-
                 for (Future<CallOutcome> competitor : competitors) {
                     competitorOutcomes.add(await(competitor));
                 }
                 demoChatModel.releaseProvider();
                 primaryOutcome = await(primary);
-            }
-            finally {
+            } finally {
                 demoChatModel.releaseProvider();
             }
-        }
-        catch (InterruptedException interrupted) {
+        } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
-            return failedScenario(
-                    "budget-concurrency",
-                    "동시 예약 검증 중 thread가 중단되었습니다.",
-                    Map.of("error", "INTERRUPTED")
-            );
-        }
-        catch (RuntimeException failure) {
-            return failedScenario(
-                    "budget-concurrency",
-                    "동시 예약 시나리오가 완료되지 않았습니다.",
-                    Map.of("error", sanitize(failure.getMessage()))
-            );
+            return failedScenario("budget-concurrency", "동시 예약 검증 중 thread가 중단되었습니다.", Map.of("error", "INTERRUPTED"));
+        } catch (RuntimeException failure) {
+            return failedScenario("budget-concurrency", "동시 예약 시나리오가 완료되지 않았습니다.", Map.of("error", sanitize(failure.getMessage())));
         }
 
-        long blocked = competitorOutcomes.stream()
-                .filter(outcome -> outcome.state().equals("BLOCKED"))
-                .count();
-        boolean passed = primaryOutcome.state().equals("COMMITTED")
-                && blocked == COMPETITOR_COUNT
-                && demoChatModel.invocationCount() == 1;
+        long blocked = competitorOutcomes.stream().filter(o -> o.state().equals("BLOCKED")).count();
+        boolean passed = primaryOutcome.state().equals("COMMITTED") && blocked == COMPETITOR_COUNT && demoChatModel.invocationCount() == 1;
         Map<String, Object> evidence = new LinkedHashMap<>();
         evidence.put("primary", primaryOutcome.state());
-        evidence.put("competitors", competitorOutcomes.stream()
-                .map(CallOutcome::state)
-                .toList());
+        evidence.put("competitors", competitorOutcomes.stream().map(CallOutcome::state).toList());
         evidence.put("admittedRequests", 1);
         evidence.put("blockedRequests", blocked);
         evidence.put("providerInvocations", demoChatModel.invocationCount());
         evidence.put("expectedProviderInvocations", 1);
         evidence.put("budget", budgetSnapshot(tenant));
-        return new DemoScenarioResult(
-                "budget-concurrency",
-                passed ? "PASS" : "FAIL",
-                passed
-                        ? "원자적 예약으로 1건만 provider에 도달하고 나머지는 BLOCKED 되었습니다."
-                        : "동시 예약 결과가 원자적 admission 기대와 다릅니다.",
-                evidence
-        );
+        return new DemoScenarioResult("budget-concurrency", passed ? "PASS" : "FAIL", passed ? "원자적 예약으로 1건만 provider에 도달하고 나머지는 BLOCKED 되었습니다." : "동시 예약 결과가 원자적 admission 기대와 다릅니다.", evidence);
     }
 
     private DemoScenarioResult idempotency(String runId) {
@@ -297,56 +213,23 @@ public class DemoScenarioService {
         try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             try {
                 demoChatModel.blockNextProviderCall();
-                Future<CallOutcome> first = executor.submit(
-                        () -> invokeChat(
-                                tenant,
-                                requestId,
-                                attemptId,
-                                idempotencyKey,
-                                "The same idempotency key must not dispatch twice.",
-                                REQUEST_OUTPUT_TOKENS
-                        )
-                );
-                if (!demoChatModel.awaitProviderEntry(5, TimeUnit.SECONDS)) {
-                    throw new IllegalStateException("demo provider did not enter in time");
-                }
-                Future<CallOutcome> duplicate = executor.submit(
-                        () -> invokeChat(
-                                tenant,
-                                requestId,
-                                attemptId,
-                                idempotencyKey,
-                                "The same idempotency key must not dispatch twice.",
-                                REQUEST_OUTPUT_TOKENS
-                        )
-                );
+                Future<CallOutcome> first = executor.submit(() -> invokeChat(tenant, requestId, attemptId, idempotencyKey, "The same idempotency key must not dispatch twice.", REQUEST_OUTPUT_TOKENS));
+                if (!demoChatModel.awaitProviderEntry(5, TimeUnit.SECONDS)) throw new IllegalStateException("demo provider did not enter in time");
+                Future<CallOutcome> duplicate = executor.submit(() -> invokeChat(tenant, requestId, attemptId, idempotencyKey, "The same idempotency key must not dispatch twice.", REQUEST_OUTPUT_TOKENS));
                 duplicateOutcome = await(duplicate);
                 demoChatModel.releaseProvider();
                 firstOutcome = await(first);
-            }
-            finally {
+            } finally {
                 demoChatModel.releaseProvider();
             }
-        }
-        catch (InterruptedException interrupted) {
+        } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
-            return failedScenario(
-                    "idempotency",
-                    "멱등성 검증 중 thread가 중단되었습니다.",
-                    Map.of("error", "INTERRUPTED")
-            );
-        }
-        catch (RuntimeException failure) {
-            return failedScenario(
-                    "idempotency",
-                    "멱등성 시나리오가 완료되지 않았습니다.",
-                    Map.of("error", sanitize(failure.getMessage()))
-            );
+            return failedScenario("idempotency", "멱등성 검증 중 thread가 중단되었습니다.", Map.of("error", "INTERRUPTED"));
+        } catch (RuntimeException failure) {
+            return failedScenario("idempotency", "멱등성 시나리오가 완료되지 않았습니다.", Map.of("error", sanitize(failure.getMessage())));
         }
 
-        boolean passed = firstOutcome.state().equals("COMMITTED")
-                && duplicateOutcome.state().equals("DUPLICATE_NOT_DISPATCHED")
-                && demoChatModel.invocationCount() == 1;
+        boolean passed = firstOutcome.state().equals("COMMITTED") && duplicateOutcome.state().equals("DUPLICATE_NOT_DISPATCHED") && demoChatModel.invocationCount() == 1;
         Map<String, Object> evidence = new LinkedHashMap<>();
         evidence.put("first", firstOutcome.state());
         evidence.put("duplicate", duplicateOutcome.state());
@@ -354,112 +237,44 @@ public class DemoScenarioService {
         evidence.put("sameIdempotencyKey", true);
         evidence.put("providerInvocations", demoChatModel.invocationCount());
         evidence.put("budget", budgetSnapshot(tenant));
-        return new DemoScenarioResult(
-                "idempotency",
-                passed ? "PASS" : "FAIL",
-                passed
-                        ? "같은 멱등성 키의 재시도는 예약을 재사용하지만 provider를 중복 호출하지 않았습니다."
-                        : "멱등성 키 재사용 결과가 기대와 다릅니다.",
-                evidence
-        );
+        return new DemoScenarioResult("idempotency", passed ? "PASS" : "FAIL", passed ? "같은 멱등성 키의 재시도는 예약을 재사용하지만 provider를 중복 호출하지 않았습니다." : "멱등성 키 재사용 결과가 기대와 다릅니다.", evidence);
     }
 
     private DemoScenarioResult release(String runId) {
         String tenant = "demo-release-" + runId;
         Cost amount = Cost.of(new BigDecimal("0.0001"), USD);
-        BudgetDecision decision = budgetEvaluator.evaluate(
-                Map.of("tenant_id", tenant),
-                amount
-        );
-        String requestId = "request-release-" + runId;
-        BudgetReservationRequest request = new BudgetReservationRequest(
-                decision.key(),
-                decision.limit(),
-                amount,
-                requestId,
-                new IdempotencyKey("idempotency-release-" + runId),
-                MODEL_ID,
-                "default",
-                CATALOG_VERSION,
-                Optional.empty(),
-                Optional.empty()
-        );
+        BudgetDecision decision = budgetEvaluator.evaluate(Map.of("tenant_id", tenant), amount);
+        BudgetReservationRequest request = new BudgetReservationRequest(decision.key(), decision.limit(), amount, "request-release-" + runId, new IdempotencyKey("idempotency-release-" + runId), MODEL_ID, "default", CATALOG_VERSION, Optional.empty(), Optional.empty());
         BudgetReservationResult reservation = budgetStateStore.checkAndReserve(request);
-        ReservationTransition transition = budgetStateStore.releaseBeforeDispatch(
-                reservation.reservationId()
-        );
+        ReservationTransition transition = budgetStateStore.releaseBeforeDispatch(reservation.reservationId());
         Map<String, Object> evidence = new LinkedHashMap<>();
         evidence.put("reservationStatus", reservation.status().name());
         evidence.put("transitionStatus", transition.status().name());
         evidence.put("resultingState", transition.resultingState().name());
         evidence.put("providerInvocations", 0);
         evidence.put("budget", budgetSnapshot(tenant));
-        boolean passed = reservation.status().name().equals("CREATED")
-                && transition.resultingState() == ReservationState.RELEASED
-                && transition.status().isApplied();
-        return new DemoScenarioResult(
-                "release",
-                passed ? "PASS" : "FAIL",
-                passed
-                        ? "provider dispatch 전 예약 실패를 안전하게 release 했습니다."
-                        : "dispatch 전 release 결과가 기대와 다릅니다.",
-                evidence
-        );
+        boolean passed = reservation.status().name().equals("CREATED") && transition.resultingState() == ReservationState.RELEASED && transition.status().isApplied();
+        return new DemoScenarioResult("release", passed ? "PASS" : "FAIL", passed ? "provider dispatch 전 예약 실패를 안전하게 release 했습니다." : "dispatch 전 release 결과가 기대와 다릅니다.", evidence);
     }
 
-    private DemoScenarioResult reconciliation(
-            String runId,
-            ReconciliationMode mode
-    ) {
+    private DemoScenarioResult reconciliation(String runId, ReconciliationMode mode) {
         demoChatModel.reset();
         String tenant = "demo-reconciliation-" + mode.name().toLowerCase() + "-" + runId;
-        if (mode == ReconciliationMode.PROVIDER_FAILURE) {
-            demoChatModel.failNextCall();
-        }
-        else if (mode == ReconciliationMode.USAGE_UNKNOWN) {
-            demoChatModel.omitUsageNextCall();
-        }
+        if (mode == ReconciliationMode.PROVIDER_FAILURE) demoChatModel.failNextCall();
+        else if (mode == ReconciliationMode.PROVIDER_TIMEOUT) demoChatModel.timeoutNextCall();
+        else if (mode == ReconciliationMode.USAGE_UNKNOWN) demoChatModel.omitUsageNextCall();
 
-        CallOutcome outcome = invokeChat(
-                tenant,
-                "request-reconciliation-" + runId,
-                "attempt-reconciliation-" + runId,
-                "idempotency-reconciliation-" + mode.name().toLowerCase() + "-" + runId,
-                "Reconcile this deterministic demo request.",
-                REQUEST_OUTPUT_TOKENS
-        );
+        CallOutcome outcome = invokeChat(tenant, "request-reconciliation-" + runId, "attempt-reconciliation-" + runId, "idempotency-reconciliation-" + mode.name().toLowerCase() + "-" + runId, "Reconcile this deterministic demo request.", REQUEST_OUTPUT_TOKENS);
         BudgetSnapshot snapshot = readBudgetSnapshot(tenant);
         Map<String, Object> budget = budgetEvidence(snapshot);
-        String accountingState = mode == ReconciliationMode.SUCCESS
-                ? "COMMITTED"
-                : "RECONCILIATION_REQUIRED";
-
-        // 실패 및 결과 불명확(RECONCILIATION_REQUIRED) 흐름만 별도로 Observe 전송 (SUCCESS는 LedgerListener가 자동 전송)
-        // 성공(SUCCESS), 실패(PROVIDER_FAILURE), 결과 불명확(USAGE_UNKNOWN) 흐름 Observe 전송
-        if (mode == ReconciliationMode.SUCCESS) {
-            observeLedgerListener.ifPresent(listener -> listener.onRecord(
-                    new io.tokenpilot.core.domain.CostRecordedEvent(
-                            MODEL_ID,
-                            io.tokenpilot.core.domain.TokenUsage.from(12L, 8L),
-                            snapshot.committedCost(),
-                            Map.of("scenario", "reconciliation-success", "requestId", "req-reconciliation-success-" + runId)
-                    )
-            ));
-        }
-        else if (mode == ReconciliationMode.PROVIDER_FAILURE) {
-            observeLedgerListener.ifPresent(listener ->
-                    listener.sendNonSuccessFlow("reconciliation-failure", MODEL_ID, "PROVIDER_FAILED", accountingState));
-        }
-        else if (mode == ReconciliationMode.USAGE_UNKNOWN) {
-            observeLedgerListener.ifPresent(listener ->
-                    listener.sendNonSuccessFlow("reconciliation-unknown", MODEL_ID, "USAGE_UNKNOWN", accountingState));
-        }
+        String accountingState = mode == ReconciliationMode.SUCCESS ? "COMMITTED" : "RECONCILIATION_REQUIRED";
 
         boolean pending = snapshot.pendingReconciliationLiability().value().signum() > 0;
         boolean committed = snapshot.committedCost().value().signum() > 0;
         boolean passed = switch (mode) {
             case SUCCESS -> outcome.state().equals("COMMITTED") && committed && !pending;
             case PROVIDER_FAILURE -> outcome.state().equals("PROVIDER_FAILED") && pending && !committed;
+            case PROVIDER_TIMEOUT -> outcome.state().equals("PROVIDER_TIMEOUT") && pending && !committed;
             case USAGE_UNKNOWN -> outcome.state().equals("COMMITTED") && pending && !committed;
         };
         Map<String, Object> evidence = new LinkedHashMap<>();
@@ -469,73 +284,29 @@ public class DemoScenarioService {
         evidence.put("accountingState", accountingState);
         evidence.put("providerInvocations", demoChatModel.invocationCount());
         evidence.put("budget", budget);
-        return new DemoScenarioResult(
-                "reconciliation-" + mode.pathName,
-                passed ? "PASS" : "FAIL",
-                passed
-                        ? mode.summary
-                        : "provider 결과와 accounting 상태가 기대와 다릅니다.",
-                evidence
-        );
+        return new DemoScenarioResult("reconciliation-" + mode.pathName, passed ? "PASS" : "FAIL", passed ? mode.summary : "provider 결과와 accounting 상태가 기대와 다릅니다.", evidence);
     }
 
-    private CallOutcome invokeChat(
-            String tenant,
-            String requestId,
-            String attemptId,
-            String idempotencyKey,
-            String text,
-            long maxTokens
-    ) {
+    private CallOutcome invokeChat(String tenant, String requestId, String attemptId, String idempotencyKey, String text, long maxTokens) {
         try {
-            ChatClientResponse response = chatClientBuilder.clone()
-                    .build()
-                    .prompt()
-                    .user(text)
-                    .options(ChatOptions.builder()
-                            .model(MODEL_ID)
-                            .maxTokens((int) maxTokens))
-                    .advisors(advisors -> advisors
-                            .param("tenant_id", tenant)
-                            .param("tokenpilot.request.id", requestId)
-                            .param("tokenpilot.attempt.id", attemptId)
-                            .param("tokenpilot.idempotency.key", new IdempotencyKey(idempotencyKey)))
-                    .call()
-                    .chatClientResponse();
-            String responseText = response.chatResponse()
-                    .getResult()
-                    .getOutput()
-                    .getText();
+            ChatClientResponse response = chatClientBuilder.clone().build().prompt().user(text).options(ChatOptions.builder().model(MODEL_ID).maxTokens((int) maxTokens)).advisors(advisors -> advisors.param("tenant_id", tenant).param("tokenpilot.request.id", requestId).param("tokenpilot.attempt.id", attemptId).param("tokenpilot.idempotency.key", new IdempotencyKey(idempotencyKey))).call().chatClientResponse();
+            String responseText = response.chatResponse().getResult().getOutput().getText();
             return new CallOutcome("COMMITTED", "provider response returned", responseText);
-        }
-        catch (RuntimeException failure) {
+        } catch (RuntimeException failure) {
             String message = sanitize(failure.getMessage());
-            String state = message.contains("budget reservation rejected")
-                    ? "BLOCKED"
-                    : message.contains("reservation dispatch was not claimed")
-                    ? "DUPLICATE_NOT_DISPATCHED"
-                    : message.contains("demo provider failure")
-                    ? "PROVIDER_FAILED"
+            String state = message.contains("budget reservation rejected") ? "BLOCKED"
+                    : message.contains("reservation dispatch was not claimed") ? "DUPLICATE_NOT_DISPATCHED"
+                    : message.contains("demo provider timeout") ? "PROVIDER_TIMEOUT"
+                    : message.contains("demo provider failure") ? "PROVIDER_FAILED"
                     : "FAILED";
             return CallOutcome.failed(state, message);
         }
     }
 
-    private CallOutcome await(Future<CallOutcome> future)
-            throws InterruptedException {
-        try {
-            return future.get(10, TimeUnit.SECONDS);
-        }
-        catch (ExecutionException executionFailure) {
-            Throwable cause = executionFailure.getCause();
-            return CallOutcome.failed(
-                    "TASK_FAILED",
-                    sanitize(cause == null ? executionFailure.getMessage() : cause.getMessage())
-            );
-        }
-        catch (TimeoutException timeout) {
-            return CallOutcome.failed("TIMEOUT", "demo scenario future timed out");
-        }
+    private CallOutcome await(Future<CallOutcome> future) throws InterruptedException {
+        try { return future.get(10, TimeUnit.SECONDS); }
+        catch (ExecutionException executionFailure) { Throwable cause = executionFailure.getCause(); return CallOutcome.failed("TASK_FAILED", sanitize(cause == null ? executionFailure.getMessage() : cause.getMessage())); }
+        catch (TimeoutException timeout) { return CallOutcome.failed("TIMEOUT", "demo scenario future timed out"); }
     }
 
     private BudgetResult checkContext(String text, long reservedOutputTokens) {
@@ -543,25 +314,9 @@ public class DemoScenarioService {
         TokenCountResult textResult = tokenEstimator.estimate(framed);
         TokenCountResult requestResult;
         if (textResult.isUnavailable()) {
-            requestResult = TokenCountResult.unavailable(
-                    textResult.unavailableReason().orElseThrow(),
-                    TokenCountScope.REQUEST,
-                    textResult.estimatorDescriptor(),
-                    textResult.tokenizationBasis()
-            );
-        }
-        else {
-            requestResult = TokenCountResult.counted(
-                    textResult.tokens().orElseThrow(),
-                    Math.addExact(
-                            textResult.safeUpperBoundTokens().orElseThrow(),
-                            properties.getSpringAi().getFramingHeadroomTokens()
-                    ),
-                    TokenCountAccuracy.HEURISTIC,
-                    TokenCountScope.REQUEST,
-                    textResult.estimatorDescriptor(),
-                    textResult.tokenizationBasis()
-            );
+            requestResult = TokenCountResult.unavailable(textResult.unavailableReason().orElseThrow(), TokenCountScope.REQUEST, textResult.estimatorDescriptor(), textResult.tokenizationBasis());
+        } else {
+            requestResult = TokenCountResult.counted(textResult.tokens().orElseThrow(), Math.addExact(textResult.safeUpperBoundTokens().orElseThrow(), properties.getSpringAi().getFramingHeadroomTokens()), TokenCountAccuracy.HEURISTIC, TokenCountScope.REQUEST, textResult.estimatorDescriptor(), textResult.tokenizationBasis());
         }
         return tokenBudget.check(MODEL_ID, requestResult, reservedOutputTokens);
     }
@@ -571,44 +326,26 @@ public class DemoScenarioService {
         evidence.put("status", result.status().name());
         evidence.put("reason", result.reason().name());
         evidence.put("model", result.canonicalModelId().orElse(MODEL_ID));
-        evidence.put("inputEstimatedTokens", result.inputEstimatedTokens().isPresent()
-                ? result.inputEstimatedTokens().getAsLong()
-                : "unavailable");
-        evidence.put("inputSafeUpperBoundTokens", result.inputSafeUpperBoundTokens().isPresent()
-                ? result.inputSafeUpperBoundTokens().getAsLong()
-                : "unavailable");
+        evidence.put("inputEstimatedTokens", result.inputEstimatedTokens().isPresent() ? result.inputEstimatedTokens().getAsLong() : "unavailable");
+        evidence.put("inputSafeUpperBoundTokens", result.inputSafeUpperBoundTokens().isPresent() ? result.inputSafeUpperBoundTokens().getAsLong() : "unavailable");
         evidence.put("reservedOutputTokens", result.reservedOutputTokens());
-        evidence.put("maxContextTokens", result.maxContextTokens().isPresent()
-                ? result.maxContextTokens().getAsLong()
-                : "unavailable");
-        evidence.put("remainingTokens", result.remainingTokens().isPresent()
-                ? result.remainingTokens().getAsLong()
-                : "not-provided-for-rejected-admission");
-        evidence.put("estimator", result.estimatorDescriptor().estimatorId()
-                + "@" + result.estimatorDescriptor().estimatorVersion());
+        evidence.put("maxContextTokens", result.maxContextTokens().isPresent() ? result.maxContextTokens().getAsLong() : "unavailable");
+        evidence.put("remainingTokens", result.remainingTokens().isPresent() ? result.remainingTokens().getAsLong() : "not-provided-for-rejected-admission");
+        evidence.put("estimator", result.estimatorDescriptor().estimatorId() + "@" + result.estimatorDescriptor().estimatorVersion());
         evidence.put("tokenizationBasis", result.tokenizationBasis().id());
-        evidence.put("catalogVersion", modelRegistry.find(MODEL_ID)
-                .map(model -> model.catalogVersion())
-                .orElse("unknown"));
+        evidence.put("catalogVersion", modelRegistry.find(MODEL_ID).map(m -> m.catalogVersion()).orElse("unknown"));
         evidence.put("scope", "REQUEST");
         return evidence;
     }
 
-    private Map<String, Object> budgetSnapshot(String tenant) {
-        return budgetEvidence(readBudgetSnapshot(tenant));
-    }
-
-    private BudgetSnapshot readBudgetSnapshot(String tenant) {
-        BudgetDecision decision = budgetEvaluator.evaluate(Map.of("tenant_id", tenant));
-        return budgetStateStore.snapshot(decision.key(), decision.limit());
-    }
+    private Map<String, Object> budgetSnapshot(String tenant) { return budgetEvidence(readBudgetSnapshot(tenant)); }
+    private BudgetSnapshot readBudgetSnapshot(String tenant) { BudgetDecision decision = budgetEvaluator.evaluate(Map.of("tenant_id", tenant)); return budgetStateStore.snapshot(decision.key(), decision.limit()); }
 
     private Map<String, Object> budgetEvidence(BudgetSnapshot snapshot) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("committedCost", CostBoundaryFormatter.format(snapshot.committedCost()));
         result.put("activeReservedCost", CostBoundaryFormatter.format(snapshot.activeReservedCost()));
-        result.put("pendingReconciliationLiability",
-                CostBoundaryFormatter.format(snapshot.pendingReconciliationLiability()));
+        result.put("pendingReconciliationLiability", CostBoundaryFormatter.format(snapshot.pendingReconciliationLiability()));
         result.put("effectiveUsage", CostBoundaryFormatter.format(snapshot.effectiveUsage()));
         result.put("remaining", CostBoundaryFormatter.format(snapshot.remaining()));
         result.put("limit", CostBoundaryFormatter.format(snapshot.limit()));
@@ -618,34 +355,23 @@ public class DemoScenarioService {
 
     private Map<String, Double> metricSnapshot() {
         Map<String, Double> metrics = new LinkedHashMap<>();
-        metrics.put("preflightFits", counter(
-                "tokenpilot.preflight.requests", "decision", "fits", "reason", "within_context"
-        ));
-        metrics.put("preflightExceeds", counter(
-                "tokenpilot.preflight.requests", "decision", "exceeds", "reason", "context_exceeded"
-        ));
-        metrics.put("reservationsCreated", counter(
-                "tokenpilot.budget.reservations", "state", "created"
-        ));
-        metrics.put("reservationsReused", counter(
-                "tokenpilot.budget.reservations", "state", "reused"
-        ));
-        metrics.put("reservationsBlocked", counter(
-                "tokenpilot.budget.reservations", "state", "blocked"
-        ));
-        metrics.put("committedCostUsd", counter(
-                "tokenpilot.cost.total", "currency", "USD"
-        ));
-        metrics.put("reconciliationCommitted", counter(
-                "tokenpilot.reconciliation.outcomes", "outcome", "committed", "reason", "actual_usage_reported"
-        ));
-        metrics.put("reconciliationRequired", counter(
-                "tokenpilot.reconciliation.outcomes", "outcome", "reconciliation_required", "reason", "actual_usage_unavailable"
-        ));
-        metrics.put("observeIngestionSuccess", meterRegistry.find("tokenpilot_observe_ingestion_success_total")
-                .counters().stream().mapToDouble(Counter::count).sum());
-        metrics.put("observeIngestionFailure", meterRegistry.find("tokenpilot_observe_ingestion_failure_total")
-                .counters().stream().mapToDouble(Counter::count).sum());
+        metrics.put("preflightFits", counter("tokenpilot.preflight.requests", "decision", "fits", "reason", "within_context"));
+        metrics.put("preflightExceeds", counter("tokenpilot.preflight.requests", "decision", "exceeds", "reason", "context_exceeded"));
+        metrics.put("reservationsCreated", counter("tokenpilot.budget.reservations", "state", "created"));
+        metrics.put("reservationsReused", counter("tokenpilot.budget.reservations", "state", "reused"));
+        metrics.put("reservationsBlocked", counter("tokenpilot.budget.reservations", "state", "blocked"));
+        metrics.put("committedCostUsd", counter("tokenpilot.cost.total", "currency", "USD"));
+        metrics.put("reconciliationCommitted", counter("tokenpilot.reconciliation.outcomes", "outcome", "committed", "reason", "actual_usage_reported"));
+        metrics.put("reconciliationRequired", counter("tokenpilot.reconciliation.outcomes", "outcome", "reconciliation_required", "reason", "actual_usage_unavailable"));
+        tokenPilotClient.ifPresent(client -> {
+            ClientStats stats = client.stats();
+            metrics.put("observeSdkRecorded", (double) stats.recorded());
+            metrics.put("observeSdkCreated", (double) stats.created());
+            metrics.put("observeSdkDuplicates", (double) stats.duplicates());
+            metrics.put("observeSdkRetried", (double) stats.retried());
+            metrics.put("observeSdkDroppedTotal", (double) stats.droppedTotal());
+            metrics.put("observeSdkDroppedRefused", (double) stats.dropped().getOrDefault(DropReason.REQUEST_REFUSED, 0L));
+        });
         return metrics;
     }
 
@@ -654,30 +380,19 @@ public class DemoScenarioService {
         return counter == null ? 0.0 : counter.count();
     }
 
-    private DemoScenarioResult failedScenario(
-            String scenario,
-            String summary,
-            Map<String, Object> evidence
-    ) {
+    private DemoScenarioResult failedScenario(String scenario, String summary, Map<String, Object> evidence) {
         return new DemoScenarioResult(scenario, "FAIL", summary, evidence);
     }
 
-    private String nextRunId() {
-        return "run-" + runSequence.incrementAndGet();
-    }
+    private String nextRunId() { return "run-" + runSequence.incrementAndGet(); }
 
     private static String sanitize(String value) {
-        if (value == null || value.isBlank()) {
-            return "unspecified";
-        }
+        if (value == null || value.isBlank()) return "unspecified";
         String normalized = value.replaceAll("\\s+", " ");
-        return normalized.length() <= 160
-                ? normalized
-                : normalized.substring(0, 157) + "...";
+        return normalized.length() <= 160 ? normalized : normalized.substring(0, 157) + "...";
     }
 
     private record CallOutcome(String state, String detail, String response) {
-
         static CallOutcome failed(String state, String detail) {
             return new CallOutcome(state, detail, "not-returned");
         }
@@ -686,6 +401,7 @@ public class DemoScenarioService {
     private enum ReconciliationMode {
         SUCCESS("success", "provider usage를 actual로 commit했습니다."),
         PROVIDER_FAILURE("failure", "provider 실패 후 estimate liability를 reconciliation 대기로 보존했습니다."),
+        PROVIDER_TIMEOUT("timeout", "provider timeout 후 결과 불명확 상태에서 estimate liability를 reconciliation 대기로 보존했습니다."),
         USAGE_UNKNOWN("unknown", "provider 응답은 반환됐지만 usage 불명으로 reconciliation 대기에 보존했습니다.");
 
         private final String pathName;

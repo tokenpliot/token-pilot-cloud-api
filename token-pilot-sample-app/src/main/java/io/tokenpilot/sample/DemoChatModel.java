@@ -16,14 +16,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/**
- * Network-free Spring AI provider for recording and local verification.
- *
- * <p>It is not registered in the default profile and is used only by the
- * {@code demo} profile. Provider usage, failures, missing usage, and concurrent
- * dispatch waiting can all be reproduced deterministically, allowing the
- * adapter and accounting lifecycle to be verified without an API key.</p>
- */
 public final class DemoChatModel implements ChatModel {
 
     private static final Usage DEFAULT_USAGE = new DefaultUsage(8, 3);
@@ -85,6 +77,10 @@ public final class DemoChatModel implements ChatModel {
 
     public void failNextCall() {
         nextFailure = new IllegalStateException("demo provider failure");
+    }
+
+    public void timeoutNextCall() {
+        nextFailure = new RuntimeException("demo provider timeout: response indeterminate after deadline");
     }
 
     public void omitUsageNextCall() {

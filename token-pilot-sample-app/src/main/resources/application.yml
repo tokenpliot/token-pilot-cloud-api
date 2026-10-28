@@ -2,6 +2,8 @@ server:
   port: 8080
 
 spring:
+  application:
+    name: token-pilot-sample-app
   ai:
     model:
       chat: none
@@ -34,10 +36,13 @@ token-pilot:
     enabled: true
     legacy-ai-token-metrics-enabled: false
     tag-whitelist: []
-  observe:
-    enabled: false
-    base-url: http://localhost:8081
-    api-key: password
-    project-key: demo-project
-    environment: demo
-    pricing-version: 2026-10-v1
+  client:
+    ingestion-api: observe-v2
+    api-key: ${TP_API_KEY:}
+    project-key: ${TP_PROJECT_KEY:demo-project}
+    environment: ${TP_ENVIRONMENT:demo}
+    provider: openai
+    flush-interval: 1s
+    forwarded-tags:
+      tenant_id: tenant_id
+      scenario: scenario

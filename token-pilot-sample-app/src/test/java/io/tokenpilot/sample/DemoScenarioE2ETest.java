@@ -34,7 +34,8 @@ class DemoScenarioE2ETest {
                 .contains("\"provider\":\"in-memory DemoChatModel\"")
                 .contains("\"networkCall\":false")
                 .contains("\"apiKeyRequired\":false")
-                .contains("/test/token-pilot/demo/run");
+                .contains("/test/token-pilot/demo/run")
+                .contains("/test/token-pilot/demo/reconciliation-timeout");
     }
 
     @Test
@@ -58,6 +59,14 @@ class DemoScenarioE2ETest {
                 .contains("\"reconciliationRequired\"");
         assertThat(count(response.body(), "\"status\":\"PASS\""))
                 .isEqualTo(8);
+
+        HttpResponse<String> timeoutResponse = get("/test/token-pilot/demo/reconciliation-timeout");
+        assertThat(timeoutResponse.statusCode()).isEqualTo(200);
+        assertThat(timeoutResponse.body())
+                .contains("\"scenario\":\"reconciliation-timeout\"")
+                .contains("\"status\":\"PASS\"")
+                .contains("\"providerOutcome\":\"PROVIDER_TIMEOUT\"")
+                .contains("\"accountingState\":\"RECONCILIATION_REQUIRED\"");
     }
 
     @Test

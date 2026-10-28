@@ -35,6 +35,7 @@ public class DemoController {
                         "/test/token-pilot/demo/release",
                         "/test/token-pilot/demo/reconciliation-success",
                         "/test/token-pilot/demo/reconciliation-failure",
+                        "/test/token-pilot/demo/reconciliation-timeout",
                         "/test/token-pilot/demo/reconciliation-unknown"
                 )
         );
@@ -78,6 +79,11 @@ public class DemoController {
     @GetMapping("/test/token-pilot/demo/reconciliation-failure")
     public DemoScenarioResult reconciliationFailure() {
         return scenarioService.reconciliationFailure();
+    }
+
+    @GetMapping("/test/token-pilot/demo/reconciliation-timeout")
+    public DemoScenarioResult reconciliationTimeout() {
+        return scenarioService.reconciliationTimeout();
     }
 
     @GetMapping("/test/token-pilot/demo/reconciliation-unknown")
