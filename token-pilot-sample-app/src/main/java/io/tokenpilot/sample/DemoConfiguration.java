@@ -9,8 +9,9 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
 
 /** Spring AI configuration for running the sample app in the demo profile without an API key. */
+// observe 프로필도 같은 가짜 provider를 쓴다. (이슈 #13 Observe E2E 검증용)
 @Configuration(proxyBeanMethods = false)
-@Profile("demo")
+@Profile({"demo", "observe"})
 public class DemoConfiguration {
 
     @Bean
