@@ -5,11 +5,17 @@ import java.util.List;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.Lock;
+import jakarta.persistence.LockModeType;
 
 import com.tokenledgercloud.api.domain.project.entity.Project;
 import com.tokenledgercloud.api.domain.project.entity.ProjectStatus;
 
 public interface ProjectRepository extends JpaRepository<Project, String> {
+
+        @Lock(LockModeType.PESSIMISTIC_WRITE)
+        @Query("select p from Project p where p.id = :id and p.organizationId = :organizationId")
+        Optional<Project> lockByIdAndOrganizationId(String id, String organizationId);
 
         Optional<Project> findByOrganizationIdAndProjectKey(String organizationId, String projectKey);
 
