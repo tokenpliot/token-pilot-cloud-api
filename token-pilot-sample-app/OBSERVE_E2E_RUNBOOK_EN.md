@@ -90,7 +90,6 @@ cd token-pilot-cloud-api
   --spring.datasource.username=root \
   --spring.datasource.password=$DB_PASSWORD \
   --spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver \
-  --spring.jpa.hibernate.ddl-auto=none \
   --token-pilot.observe.ingestion.enabled=true \
   --token-pilot.observe.ingestion.rate-unit-tokens=1000"
 ```
@@ -98,7 +97,6 @@ cd token-pilot-cloud-api
 | Option | Why |
 |---|---|
 | `--server.port=8081` | avoids clashing with the sample app (8080) |
-| `ddl-auto=none` | with the current default `validate`, startup fails on a `pricing_catalogs.generated_yaml` type mismatch (server issue) |
 | `observe.ingestion.enabled=true` | registers the v2 ingestion endpoint (404 when off) |
 | `rate-unit-tokens=1000` | pricing plan rate unit. With the default `0` every event is `UNPRICED(RATE_UNIT_UNCONFIRMED)`. Token Pilot rates are also per 1,000 tokens |
 
@@ -165,8 +163,6 @@ Response fields:
 ### 3.6. Ledger query setup
 
 The ledger query API (`/api/observe/**`) requires authentication. For local verification, sign a token with `JWT_SECRET`.
-
-> Member API key (`X-API-KEY`) authentication currently returns 500 (`LazyInitializationException`) on the server, so it is not used (server issue).
 
 ```bash
 b64() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
@@ -293,7 +289,6 @@ unset DB_PASSWORD JWT_SECRET TP_API_KEY TP_API_KEY_HASH TP_LEDGER_JWT
 | Short retry window | Usage during outages longer than a few seconds is lost (`RETRIES_EXHAUSTED`) | tunable via `token-pilot.client.max-attempts`; operating policy to be discussed |
 | Batch partial failure | SDK v2 delivery is per event, so the sample app path has no batch | covered by the server's `IngestionBatchIntegrationTest` |
 | Ingestion metrics | SDK stats are exposed only via `/observe/stats` (not Prometheus) | ingestion lag via the server's `/api/observe/ledger/ingestion-lag` |
-| Server needs `ddl-auto=none`; member API key returns 500 | worked around in this runbook (3.3, 3.6) | server issues, team agreement needed |
 
 ## 6. Troubleshooting
 
@@ -301,7 +296,6 @@ unset DB_PASSWORD JWT_SECRET TP_API_KEY TP_API_KEY_HASH TP_LEDGER_JWT
 |---|---|
 | Sample app fails with `apiKey must not be blank` | `TP_API_KEY` is not exported in the sample app terminal |
 | `Could not resolve cloud.token-pilot:...` | 1.2 local install was skipped |
-| Server fails with `Schema validation: wrong column type ... generated_yaml` | `--spring.jpa.hibernate.ddl-auto=none` is missing |
 | `sdk.dropped.REQUEST_REFUSED` increases | API key, `project-key` or `environment` mismatch, or a revoked key |
 | Ledger query 404 "프로젝트를 찾을 수 없습니다" (project not found) | organization id is not `default-org`, or the project key was passed as `projectId` |
 | `UNPRICED` in the ledger | missing `rate-unit-tokens` (`RATE_UNIT_UNCONFIRMED`) or no pricing plan (`PRICE_NOT_FOUND`) |

@@ -4,6 +4,8 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.UUID;
 
+import org.hibernate.Length;
+
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -35,8 +37,9 @@ public class PricingCatalog {
 	@Column(name = "is_active", nullable = false)
 	private Boolean isActive;
 
+	// V1 declares longtext; without LONG32, Hibernate's MySQL dialect expects tinytext and validate fails at startup.
 	@Lob
-	@Column(name = "generated_yaml", nullable = false)
+	@Column(name = "generated_yaml", nullable = false, length = Length.LONG32)
 	private String generatedYaml;
 
 	@Column(name = "published_at")
