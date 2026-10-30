@@ -1,0 +1,22 @@
+# 이슈 #13 Observe E2E 검증용 프로필.
+# 예산(budget)을 끄면 Token Pilot이 ledger 기록 경로를 써서 LedgerListener → SDK 전송이 일어난다.
+# (예산을 켜는 demo 프로필은 예약·정산 경로라 현재 SDK로 이벤트가 전송되지 않는다. 런북 참고)
+# SDK 전송은 실행 시 --token-pilot.client.endpoint=... 를 줘야 켜진다.
+token-pilot:
+  pricing:
+    plans:
+      - model-id: gpt-4o-2024-08-06
+        currency: USD
+        rates:
+          PROMPT: 0.00015
+          COMPLETION: 0.00060
+      # 서버에는 가격표를 등록하지 않는 모델. 중앙 원장의 가격 누락(UNPRICED) 조회 검증용
+      - model-id: gpt-4o-mini-2024-07-18
+        currency: USD
+        rates:
+          PROMPT: 0.00015
+          COMPLETION: 0.00060
+  spring-ai:
+    default-model-id: gpt-4o-2024-08-06
+  budget:
+    enabled: false

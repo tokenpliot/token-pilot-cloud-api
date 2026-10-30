@@ -1,0 +1,48 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: token-pilot-sample-app
+  ai:
+    model:
+      chat: none
+      embedding: none
+      image: none
+      audio:
+        transcription: none
+        speech: none
+      moderation: none
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: prometheus, health
+  metrics:
+    tags:
+      application: token-pilot-sample-app
+
+token-pilot:
+  enabled: true
+  pricing:
+    plans:
+      - model-id: gpt-4o-mini
+        currency: USD
+        rates:
+          PROMPT: 0.00015
+          COMPLETION: 0.00060
+  metrics:
+    enabled: true
+    legacy-ai-token-metrics-enabled: false
+    tag-whitelist: []
+  client:
+    ingestion-api: observe-v2
+    api-key: ${TP_API_KEY:}
+    project-key: ${TP_PROJECT_KEY:demo-project}
+    environment: ${TP_ENVIRONMENT:demo}
+    provider: openai
+    flush-interval: 1s
+    forwarded-tags:
+      tenant_id: tenant_id
+      scenario: scenario
