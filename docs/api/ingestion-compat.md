@@ -180,6 +180,7 @@
 | metadata 금지 키 | **기본(비엄격) 모드**: `400`이 아니다. 금지 키만 metadata에서 제거하고 나머지로 정상 저장한다(배치 항목도 `REJECTED` 없이 `CREATED`). 경고 로그에는 종류(`FORBIDDEN_KEY`)와 개수만 남기고 키 이름·값은 남기지 않는다. **엄격 모드**: `400`, 메시지는 `metadata contains a forbidden key`이며 키 이름과 값을 담지 않는다(배치에서는 해당 **항목만** `REJECTED`). 키 이름만 검사하며(대소문자 무시, 중첩·리스트 안의 맵 포함) 값은 보지 않는다. 어떤 모드에서도 금지 키와 그 값은 DB·로그·응답에 남지 않는다. | `token-pilot.ingestion.forbidden-metadata-keys` = `prompt, system_prompt, completion, messages, content, response` |
 | metadata 형식(항목 16개 초과, 키 형식 `^[a-z][a-z0-9_.-]{0,63}$` 위반, 문자열이 아닌 값, 256자 초과) | 기본은 경고 로그만 남기고 통과(키·값은 로그에 없음, 금지 키를 제거한 나머지로 판단). 엄격 모드에서는 `400`(최대 16개·키 패턴·값 256자 이하 계약 규칙 적용) | `token-pilot.ingestion.strict-metadata` = `false` |
 | 요청 크기 | 단건 16KB, 배치 1MB 초과 시 `413`(`INGESTION-413`). 인증·JSON 파싱 전에 거부 | `token-pilot.ingestion.max-event-bytes` = `16384`, `max-batch-bytes` = `1048576` |
+| 읽을 수 없는 본문(깨진 JSON, 빈 본문, 날짜·숫자·enum 형식 오류) | `400` `COMMON-400`(before: `500` `COMMON-500`). 배치는 본문 전체를 한 번에 해석하므로 항목 하나의 형식 오류도 **요청 전체** `400`이다. 응답과 로그에 보낸 값을 싣지 않는다(로그는 예외 종류만 `DEBUG`) | - |
 | 금액·토큰 범위 | 비용 필드는 `0` 이상 `999999999999.999999` 이하(`decimal(18,6)`). 합계를 서버가 계산할 때 비용 합계가 이 값을 넘거나 토큰 합계가 `long`을 넘으면 `400`(배치는 해당 항목만 `REJECTED`). DB 오류로 배치 전체가 `500`이 되지 않는다 | - |
 | 검증 실패 응답 | 입력값을 되돌려주지 않는다(`errors[].rejectedValue`는 `null`, 키는 유지) | - |
 | 원문 prompt/completion | 저장하지 않는다. 최상위의 알 수 없는 필드는 무시된다([한계](#7-알려진-한계)) | - |
@@ -194,14 +195,14 @@
 
 | 코드 | HTTP | 의미 | 재시도 | 나오는 곳 |
 | --- | --- | --- | --- | --- |
-| `COMMON-400` | 400 | 요청 검증 실패(필수 필드 누락, 형식, `eventId` 길이, 알 수 없는 `schemaVersion`, 엄격 모드의 금지 metadata 키 등) | 불가 | 단건·배치 요청 전체, 배치 **항목** |
+| `COMMON-400` | 400 | 요청 검증 실패(필수 필드 누락, 형식, 읽을 수 없는 본문(깨진 JSON·빈 본문·날짜 등 형식 오류), `eventId` 길이, 알 수 없는 `schemaVersion`, 엄격 모드의 금지 metadata 키 등) | 불가 | 단건·배치 요청 전체, 배치 **항목** |
 | `COMMON-401` | 401 | 키 누락·미존재·폐기·만료 | 불가 | 요청 전체 |
 | `COMMON-403` | 403 | 환경·프로젝트 불일치, 비활성 프로젝트 | 불가 | 요청 전체 |
 | `COMMON-404` | 404 | `projectKey` 없음 | 불가 | 요청 전체 |
 | `INGESTION-409` | 409 | 같은 멱등성 키에 다른 payload | 불가 | 단건, 배치 **항목** |
 | `INGESTION-413` | 413 | 요청 본문이 크기 한도 초과 | 불가(본문을 줄여야 함) | 요청 전체 |
 | `INGESTION-503` | 503 | 동시 요청을 해소하지 못함, 데드락·락 타임아웃 | **가능** | 단건, 배치 **항목** |
-| `COMMON-500` | 500 | 예상 밖 서버 오류. 깨진 JSON·빈 본문·잘못된 `Content-Type`·허용되지 않은 메서드도 여기로 나온다([한계](#7-알려진-한계)) | 서버 오류는 가능하나 원인이 계속되면 같은 결과, 요청 오류(깨진 JSON 등)는 불가 | 요청 전체 |
+| `COMMON-500` | 500 | 예상 밖 서버 오류. 잘못된 `Content-Type`·허용되지 않은 메서드도 아직 여기로 나온다([한계](#7-알려진-한계)) | 서버 오류는 가능하나 원인이 계속되면 같은 결과, 요청 오류(`Content-Type`·메서드)는 불가 | 요청 전체 |
 
 - 인증 오류(401·403·404)의 세부 메시지와 검사 순서는 [Project API Key 검증](ingestion-api-key-verification.md)에 있다.
 - 배치 **항목**의 오류는 `items[]`/`rejectedItems[]`의 `code`와 `retryable`로 나온다(`retryable`은 위 표의 재시도 열과 같다).
@@ -241,13 +242,14 @@
 | `Retry-After` 미지원 | `INGESTION-503`에도 헤더·`retryAfterSeconds`가 없다. 클라이언트가 백오프를 정해야 한다. |
 | `acceptedCount`는 중복 포함 | 기존 SDK 호환을 위한 것이다. 새로 저장된 수는 `createdCount`를 본다. |
 | 이전 행은 payload 비교 불가 | fingerprint가 없는 기존 행과 같은 키로 보내면 비교 없이 기존 이벤트를 반환한다. |
-| 프레임워크 요청 오류가 모두 `500` | 깨진 JSON, 빈 본문, 지원하지 않는 `Content-Type`, 허용되지 않은 HTTP 메서드(예: `GET`)가 `400`/`415`/`405`가 아니라 `500` `COMMON-500`으로 응답된다. 전역 `GlobalExceptionHandler`의 `Exception` 처리가 프레임워크 예외까지 가로채기 때문이며 이번 이슈 이전부터의 동작이다. 단건·배치 모두 같고 **수정하지 않았다.** 내장 서블릿 환경의 MockMvc에서 확인했다. |
+| 일부 프레임워크 요청 오류가 `500` | 지원하지 않는 `Content-Type`, 허용되지 않은 HTTP 메서드(예: `GET`)가 `415`/`405`가 아니라 `500` `COMMON-500`으로 응답된다. 전역 `GlobalExceptionHandler`의 `Exception` 처리가 프레임워크 예외까지 가로채기 때문이며 이번 이슈 이전부터의 동작이다. 깨진 JSON·빈 본문·형식 오류는 #11에서 `400`으로 바뀌었다([5절](#5-요청-검증과-개인정보)). |
 | MySQL 일부만 검증 | MySQL 8.0.46(Docker)에서 확인: V1~V5 적용, 같은 이벤트 16건 동시 전송 시 1행만 저장(유니크 위반 1062 → 재조회 → `duplicate`), 재전송 `duplicate`·payload 변경 `409`, 배치 항목별 범위 거부, 금지 키 제거, `json` 컬럼 utf8mb4 저장. 확인하지 못함: 실제 데드락의 예외 번역, 상태값·`projectKey`의 대소문자 비교(collation), 운영 연결 풀. |
 
 ## 8. 배포·클라이언트 메모
 
 - **마이그레이션**: `V5__ingestion_idempotency.sql`은 `usage_events`에 nullable 컬럼 `event_id`, `payload_fingerprint`와 유니크 `(project_id, environment, event_id)`를 추가한다. 구 바이너리와 호환된다(NULL은 유니크에서 중복으로 취급되지 않는다). #9의 회계 snapshot 초안은 V6으로 번호를 옮겼다(`docs/migrations/issue-9/V6__accounting_snapshots_draft.sql`).
 - **SDK**: 변경 없이 동작한다. 재시도 시 같은 `requestId`(또는 `eventId`)와 같은 payload를 보내면 중복 회계가 생기지 않는다. 가능하면 `eventId`를 보내는 것을 권장한다.
+- **오류 응답 변경(#11, v1 포함)**: 읽을 수 없는 본문(깨진 JSON, 빈 본문, 날짜·숫자·enum 형식 오류)이 `500`에서 `400` `COMMON-400`으로 바뀌었다. 단건·배치·Observe v2 모두 같다. `5xx`만 재시도하는 SDK는 이런 요청을 더 이상 재시도하지 않는다(같은 본문은 다시 보내도 실패하므로 의도한 동작). 상태 코드로 `500`을 기대하던 클라이언트 코드나 모니터링이 있으면 `400`으로 바꿔야 한다.
 - **롤백**: 새 컬럼은 nullable이라 앱만 되돌려도 DB를 되돌릴 필요가 없다.
 
 ## 9. 호환성을 보장하는 테스트
@@ -260,6 +262,7 @@
 | fingerprint 정규화 규칙 | `PayloadFingerprintTest` |
 | 동시 요청에서 한 건만 저장, 유니크 위반 재조회, `503` 매핑, 같은 `requestId`·다른 `eventId`의 순차·동시 `409` (모두 H2 기반) | `UsageLogServiceConcurrencyTest` |
 | 금지 키 제거·DB/로그/응답 비노출(기본·엄격 모드), fingerprint | `IngestionForbiddenMetadataDefaultModeTest`, `IngestionForbiddenMetadataStrictModeTest`, `IngestionMetadataPolicyTest` |
+| 읽을 수 없는 본문은 `400` `COMMON-400`(v1·v2), 보낸 값이 응답·로그에 없음, 인코딩한 경로로도 `413`을 피할 수 없음(실제 Tomcat) | `ObserveIngestionHttpTest` |
 | 배치 항목별 결과, 순서만 바꾼 재전송, 부분 실패, 동시 배치 | `IngestionBatchIntegrationTest` |
 | `schemaVersion`, metadata 정책, 크기 제한, 입력값 비반사 | `IngestionRequestValidationTest`, `IngestionMetadataPolicyTest`, `IngestionRequestSizeFilterTest`, `IngestionHttpIntegrationTest`, `IngestionValidationResponseTest`, `IngestionBatchMetadataIntegrationTest` |
 | 잘못된 API Key는 아무것도 저장하지 않음, 검사 순서 | `ProjectApiKeyAuthenticatorTest`, `ProjectApiKeyAuthenticatorIntegrationTest`, `IngestionApiKeyFailureIntegrationTest`, `IngestionAuthOrderHttpTest` |
