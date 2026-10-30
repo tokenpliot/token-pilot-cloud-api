@@ -29,4 +29,4 @@ POLICY_TEST_MYSQL_USER=root \
 ./gradlew test --tests '*PolicyMySqlIntegrationTest'
 ```
 
-비밀번호가 필요하면 POLICY_TEST_MYSQL_PASSWORD 환경변수로 전달한다. 해당 URL이 없으면 MySQL suite는 skip한다. Flyway V1~V7를 사용하며 pool 기본값은 REPEATABLE READ, 정책/예산 쓰기와 capture의 트랜잭션은 READ COMMITTED다. 초기 생성/동시 갱신·불변 이력·가격 연결·HTTP 권한과 함께 대소문자 예산 우회, 이미 로드된 프로젝트의 보관 처리, 서로 다른 프로젝트의 동시 최초 생성을 검증한다. 동시 생성 테스트는 양쪽의 실제 head/예산 조회를 동기화해 존재하지 않는 행을 모두 조회한 후 INSERT하도록 만든다. ddl-auto는 운영과 같은 none이다. 기존 pricing_catalogs.generated_yaml의 LOB 매핑이 Hibernate validate와 맞지 않는 문제는 #14 범위 밖이므로 변경하지 않는다.
+비밀번호가 필요하면 POLICY_TEST_MYSQL_PASSWORD 환경변수로 전달한다. 해당 URL이 없으면 MySQL suite는 skip한다. Flyway V1~V7를 사용하며 pool 기본값은 REPEATABLE READ, 정책/예산 쓰기와 capture의 트랜잭션은 READ COMMITTED다. 초기 생성/동시 갱신·불변 이력·가격 연결·HTTP 권한과 함께 대소문자 예산 우회, 이미 로드된 프로젝트의 보관 처리, 서로 다른 프로젝트의 동시 최초 생성을 검증한다. 동시 생성 테스트는 양쪽의 실제 head/예산 조회를 동기화해 존재하지 않는 행을 모두 조회한 후 INSERT하도록 만든다. ddl-auto는 validate로 실행해 모든 엔티티 매핑이 실제 MySQL 스키마와 일치하는지도 함께 확인한다.

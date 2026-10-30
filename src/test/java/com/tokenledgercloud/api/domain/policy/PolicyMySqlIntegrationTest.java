@@ -31,8 +31,8 @@ import com.tokenledgercloud.api.domain.budget.repository.MonthlyBudgetSettingRep
 	"spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver",
 	"spring.datasource.username=${POLICY_TEST_MYSQL_USER:root}",
 	"spring.datasource.password=${POLICY_TEST_MYSQL_PASSWORD:}",
-	// Match production: unrelated legacy pricing_catalogs LOB mappings do not pass Hibernate validate.
-	"spring.jpa.hibernate.ddl-auto=none",
+	// validate (the default) proves every entity mapping matches the real Flyway schema on MySQL.
+	"spring.jpa.hibernate.ddl-auto=validate",
 	"spring.jpa.show-sql=false",
 	"spring.flyway.enabled=true",
 	"spring.flyway.baseline-on-migrate=false",

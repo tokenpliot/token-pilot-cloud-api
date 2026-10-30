@@ -89,7 +89,6 @@ cd token-pilot-cloud-api
   --spring.datasource.username=root \
   --spring.datasource.password=$DB_PASSWORD \
   --spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver \
-  --spring.jpa.hibernate.ddl-auto=none \
   --token-pilot.observe.ingestion.enabled=true \
   --token-pilot.observe.ingestion.rate-unit-tokens=1000"
 ```
@@ -97,7 +96,6 @@ cd token-pilot-cloud-api
 | 옵션 | 이유 |
 |---|---|
 | `--server.port=8081` | 샘플 앱(8080)과 충돌 방지 |
-| `ddl-auto=none` | 현재 기본값 `validate`로는 `pricing_catalogs.generated_yaml` 타입 불일치로 기동 실패 (서버 이슈) |
 | `observe.ingestion.enabled=true` | v2 수집 endpoint 등록 (꺼져 있으면 404) |
 | `rate-unit-tokens=1000` | 가격표 요율 단위. 기본값 `0`이면 모든 이벤트가 `UNPRICED(RATE_UNIT_UNCONFIRMED)`. Token Pilot 요율도 1,000토큰당 |
 
@@ -163,8 +161,6 @@ cd token-pilot-cloud-api/token-pilot-sample-app
 ### 3.6. 원장 조회 준비
 
 원장 조회 API(`/api/observe/**`)는 로그인이 필요합니다. 로컬 검증에서는 `JWT_SECRET`으로 토큰을 직접 서명합니다.
-
-> 회원 API Key(`X-API-KEY`) 인증은 현재 서버에서 500(`LazyInitializationException`)이 나서 쓰지 않습니다 (서버 이슈).
 
 ```bash
 b64() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
@@ -291,7 +287,6 @@ unset DB_PASSWORD JWT_SECRET TP_API_KEY TP_API_KEY_HASH TP_LEDGER_JWT
 | 짧은 재시도 창 | 서버 중단이 수 초를 넘으면 그 사이 사용량 유실 (`RETRIES_EXHAUSTED`) | `token-pilot.client.max-attempts`로 조정 가능, 운영 기준은 논의 필요 |
 | batch 부분 실패 | SDK v2 전송은 단건이라 샘플 앱 경로에 batch 없음 | 서버 `IngestionBatchIntegrationTest`가 검증 |
 | 수집 지표 | SDK 통계는 `/observe/stats`로만 노출 (Prometheus 미노출) | 수집 지연은 서버 `/api/observe/ledger/ingestion-lag` |
-| 서버 기동 `ddl-auto=none`, 회원 API Key 500 | 런북에서 우회 (3.3, 3.6) | 서버 이슈, 팀 합의 필요 |
 
 ## 6. 문제 해결
 
@@ -299,7 +294,6 @@ unset DB_PASSWORD JWT_SECRET TP_API_KEY TP_API_KEY_HASH TP_LEDGER_JWT
 |---|---|
 | 샘플 앱 기동 실패 `apiKey must not be blank` | 샘플 앱 터미널에 `TP_API_KEY`가 export되지 않음 |
 | `Could not resolve cloud.token-pilot:...` | 1.2 로컬 설치를 하지 않음 |
-| 서버 기동 실패 `Schema validation: wrong column type ... generated_yaml` | `--spring.jpa.hibernate.ddl-auto=none` 누락 |
 | `sdk.dropped.REQUEST_REFUSED` 증가 | API Key·`project-key`·`environment` 불일치 또는 키 폐기 |
 | 원장 조회 404 "프로젝트를 찾을 수 없습니다" | 조직 id가 `default-org`가 아니거나 `projectId`에 key를 넣음 |
 | 원장에 `UNPRICED` | `rate-unit-tokens` 누락(`RATE_UNIT_UNCONFIRMED`) 또는 가격표 없음(`PRICE_NOT_FOUND`) |
