@@ -72,7 +72,7 @@ class AccountingLedgerWriterTest {
 				schemaVersion, tokenSemantics,
 				"openai", "gpt-test", 100, 50, 0, 0, 150,
 				LocalDateTime.of(2026, 10, 10, 12, 0),
-				callStatus, amount, snapshotId, null, "OBSERVE_INGEST", "SYSTEM", "ingest");
+				callStatus, amount, snapshotId, null, "OBSERVE_INGEST", "SYSTEM", "ingest", null);
 	}
 
 	// 이벤트 id에 연결된 원장 행 목록을 읽는 도우미.

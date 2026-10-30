@@ -6,13 +6,10 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 import org.springframework.stereotype.Service;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tokenledgercloud.api.domain.ingestion.dto.IngestionBatchRequest;
 import com.tokenledgercloud.api.domain.ingestion.dto.IngestionBatchItemResponse;
 import com.tokenledgercloud.api.domain.ingestion.dto.IngestionBatchResponse;
@@ -21,7 +18,6 @@ import com.tokenledgercloud.api.domain.ingestion.dto.IngestionEventRequest;
 import com.tokenledgercloud.api.domain.ingestion.dto.IngestionEventResponse;
 import com.tokenledgercloud.api.domain.ingestion.dto.IngestionItemStatus;
 import com.tokenledgercloud.api.domain.ingestion.dto.RejectedIngestionItemResponse;
-import com.tokenledgercloud.api.domain.ingestion.validation.IngestionMetadataPolicy;
 import com.tokenledgercloud.api.domain.usage.dto.UsageLogCreateRequest;
 import com.tokenledgercloud.api.domain.usage.dto.UsageLogCreateResult;
 import com.tokenledgercloud.api.domain.usage.service.UsageLogService;
@@ -39,8 +35,9 @@ public class IngestionService {
 	private final ProjectApiKeyAuthenticator projectApiKeyAuthenticator;
 	private final UsageLogService usageLogService;
 	private final Validator validator;
-	private final IngestionMetadataPolicy metadataPolicy;
-	private final ObjectMapper objectMapper = new ObjectMapper();
+	// Drops forbidden keys whatever the validation mode, so they never reach the database; the payload fingerprint
+	// (computed from this JSON) is taken without them.
+	private final IngestionMetadataSerializer metadataSerializer;
 
 	// No surrounding transaction: authentication and each usage-log write run in their own short transactions.
 	public IngestionEventResponse collectEvent(String rawApiKey, IngestionEventRequest request) {
@@ -163,7 +160,7 @@ public class IngestionService {
 			request.pricingPlanId(),
 			request.pricingVersion(),
 			sourceType(request.sourceType()),
-			metadataJson(request.metadata()),
+			metadataSerializer.toJson(request.metadata()),
 			toUtcLocalDateTime(request.occurredAt()),
 			request.eventId()
 		);
@@ -195,26 +192,10 @@ public class IngestionService {
 			item.pricingPlanId(),
 			item.pricingVersion(),
 			sourceType(item.sourceType()),
-			metadataJson(item.metadata()),
+			metadataSerializer.toJson(item.metadata()),
 			toUtcLocalDateTime(item.occurredAt()),
 			item.eventId()
 		);
-	}
-
-	/**
-	 * Forbidden keys are dropped here, whatever the validation mode, so they never reach the database, and the
-	 * payload fingerprint (computed from this JSON) is taken without them.
-	 */
-	private String metadataJson(Map<String, Object> metadata) {
-		Map<String, Object> cleaned = metadataPolicy.sanitize(metadata).metadata();
-		if (cleaned == null || cleaned.isEmpty()) {
-			return null;
-		}
-		try {
-			return objectMapper.writeValueAsString(cleaned);
-		} catch (JsonProcessingException exception) {
-			throw new ApiException(ErrorCode.INVALID_INPUT, "metadata must be JSON serializable.");
-		}
 	}
 
 	private LocalDateTime toUtcLocalDateTime(OffsetDateTime occurredAt) {

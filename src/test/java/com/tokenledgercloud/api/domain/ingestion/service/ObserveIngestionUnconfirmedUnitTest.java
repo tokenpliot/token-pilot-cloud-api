@@ -39,7 +39,8 @@ class ObserveIngestionUnconfirmedUnitTest {
 				.thenReturn(new AuthenticatedProjectApiKey("org-1", "project-1", "key-1", "prod"));
 		var response = service.collect("api-key", new ObserveEventRequest("project-key", "prod", "obs-unit-1",
 				"req-unit-1", "observe-v1", TokenSemantics.INCLUSIVE_V1, "openai", "any-model",
-				CallStatus.SUCCEEDED, 100L, 50L, 0L, 0L, OffsetDateTime.of(2026, 10, 10, 12, 0, 0, 0, ZoneOffset.UTC)));
+				CallStatus.SUCCEEDED, 100L, 50L, 0L, 0L, OffsetDateTime.of(2026, 10, 10, 12, 0, 0, 0, ZoneOffset.UTC),
+				null));
 		// 금액은 0이 아니라 null이고, 사유는 요율 단위 미확인이다.
 		var values = valueRepository.findAll().stream()
 				.filter(value -> value.getUsageEventId().equals(response.usageEventId())).toList();
