@@ -4,6 +4,7 @@ import java.util.List;
 
 
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -42,6 +43,15 @@ public class GlobalExceptionHandler {
 	public ResponseEntity<ApiResponse<Void>> handleNoResource(NoResourceFoundException exception) {
 		return ResponseEntity.status(ErrorCode.NOT_FOUND.getStatus())
 			.body(ApiResponse.error(ErrorCode.NOT_FOUND.getCode(), ErrorCode.NOT_FOUND.getMessage()));
+	}
+
+	// Unreadable bodies (broken JSON, empty body, wrong date/number format) are client input errors, not 500.
+	// The exception message can echo the client's value, so neither the response nor the log includes it.
+	@ExceptionHandler(HttpMessageNotReadableException.class)
+	public ResponseEntity<ApiResponse<Void>> handleUnreadableBody(HttpMessageNotReadableException exception) {
+		log.debug("Unreadable request body: {}", exception.getClass().getSimpleName());
+		return ResponseEntity.status(ErrorCode.INVALID_INPUT.getStatus())
+			.body(ApiResponse.error(ErrorCode.INVALID_INPUT.getCode(), ErrorCode.INVALID_INPUT.getMessage()));
 	}
 
 	@ExceptionHandler(Exception.class)

@@ -216,4 +216,51 @@ class IngestionRequestSizeFilterTest {
 		assertThat(read.get()).isEqualTo(body);
 		assertThat(length.get()).isEqualTo(body.getBytes(StandardCharsets.UTF_8).length);
 	}
+
+	@Test
+	void observeV2EndpointUsesTheEventLimit() throws Exception {
+		// Observe 수집 v2도 단건 한도(100바이트)를 따른다. 한도 이내는 통과하고 1바이트 초과는 413이다.
+		Chain within = new Chain();
+		filter.doFilter(post("/api/v2/observe/events", "x".repeat(EVENT_LIMIT)), new MockHttpServletResponse(), within);
+		Chain over = new Chain();
+		MockHttpServletResponse rejected = new MockHttpServletResponse();
+		filter.doFilter(post("/api/v2/observe/events", "x".repeat(EVENT_LIMIT + 1)), rejected, over);
+
+		assertThat(within.called).isTrue();
+		assertThat(over.called).isFalse();
+		assertThat(rejected.getStatus()).isEqualTo(413);
+	}
+
+	@Test
+	void observeV2EndpointCannotBypassTheLimitWithEncodingOrTrailingSlash() throws Exception {
+		// 퍼센트 인코딩이나 끝 슬래시로 철자를 바꿔도 같은 컨트롤러에 도달하므로 같은 한도가 적용되어야 한다.
+		for (String path : List.of("/api/v2/observe/%65vents", "/api/v2/observe/events/", "/api/v2/observe/events;v=1")) {
+			Chain chain = new Chain();
+			MockHttpServletResponse response = new MockHttpServletResponse();
+
+			filter.doFilter(post(path, "x".repeat(EVENT_LIMIT + 1)), response, chain);
+
+			assertThat(chain.called).as(path).isFalse();
+			assertThat(response.getStatus()).as(path).isEqualTo(413);
+		}
+	}
+
+	@Test
+	void observeV2SiblingPathsAndGetRequestsAreNeverTouched() throws Exception {
+		// v2 경로와 이름이 비슷한 다른 경로와 GET 요청은 건드리지 않는다.
+		String huge = "x".repeat(BATCH_LIMIT * 5);
+		for (MockHttpServletRequest request : List.of(
+			post("/api/v2/observe/events/other", huge),
+			post("/api/v2/observe", huge),
+			post("/api/v2/observe/eventsX", huge),
+			new MockHttpServletRequest("GET", "/api/v2/observe/events"))) {
+			Chain chain = new Chain();
+			MockHttpServletResponse response = new MockHttpServletResponse();
+
+			filter.doFilter(request, response, chain);
+
+			assertThat(chain.called).as(request.getMethod() + " " + request.getRequestURI()).isTrue();
+			assertThat(response.getStatus()).isEqualTo(200);
+		}
+	}
 }
