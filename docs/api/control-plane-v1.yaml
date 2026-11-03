@@ -28,6 +28,8 @@ paths:
       description: |
         판정은 provider 호출을 바꾸지 않는다. 집행 여부는 클라이언트의 `EnforcementSettings`가 결정한다.
         `reservationId`는 클라이언트가 보고한 모드가 `ENFORCE`이고 판정이 `ALLOW`일 때만 발급된다.
+        판정 API가 배포되지 않았거나 꺼져 있으면 `404` `NOT_FOUND`이고 클라이언트는 `INDETERMINATE`로 다룬다.
+        이때 `on-indeterminate: fail-closed`를 고른 범위는 모든 호출이 막히므로, 고객에게 `ENFORCE`를 안내하기 전에 이 API를 켠다.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -310,8 +312,12 @@ paths:
       operationId: settleReservation
       summary: ENFORCE 예약을 실제 사용량으로 정산하거나 해제한다.
       description: |
-        종료 상태(`COMMITTED`, `RELEASED`, `WRITTEN_OFF`)의 예약에 같은 정산을 다시 보내면 원래 결과를 반환한다.
+        종료 상태(`COMMITTED`, `RELEASED`, `WRITTEN_OFF`)의 예약에 같은 정산을 다시 보내면 원래 결과를 `duplicate: true`로 반환한다.
+        "같은 정산"은 결과 비교가 아니라 본문 비교다. 같은 `Idempotency-Key`와 `occurredAt`까지 같은 본문만 원래 결과를 받는다.
+        같은 키에 `occurredAt`만 다른 본문도 `409` `IDEMPOTENCY_CONFLICT`다. 클라이언트는 정산을 처음 만들 때 본문을 고정하고 재시도에 그대로 쓴다.
         종료 상태와 다른 결과를 요구하면 `409`를 반환한다.
+        `COMMIT`의 정산 금액 기준은 `cost.totalCostUsd`다. `promptCostUsd`·`completionCostUsd` 분할이 서버 가격표로 계산한 분할과
+        달라도 거부하지 않는다(SDK는 입력 토큰으로 prompt 비용을 계산하고 나머지를 completion에 넣어 두 값의 합을 총비용과 맞춘다).
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
         - name: reservationId
@@ -393,7 +399,11 @@ components:
       name: Idempotency-Key
       in: header
       required: true
-      description: 같은 키와 같은 본문은 같은 결과를, 같은 키와 다른 본문은 `409`를 반환한다.
+      description: |
+        같은 키와 같은 본문은 같은 결과를, 같은 키와 다른 본문은 `409`를 반환한다.
+        키 고유 범위는 (API Key의 프로젝트, 엔드포인트)다. 다른 프로젝트나 다른 엔드포인트의 같은 키는 서로 충돌하지 않는다.
+        서버는 키를 해석하지 않는 불투명 문자열로 다룬다. Java Client SDK는 판정에 `dec:<requestId>`,
+        정산에 `stl:<reservationId>:<COMMIT|RELEASE|RECONCILIATION_REQUIRED>`를 쓰고, 길이가 8~128자를 벗어나면 SHA-256 해시 형태로 바꾼다.
       schema:
         type: string
         minLength: 8
@@ -637,6 +647,7 @@ components:
         decisionId:
           $ref: '#/components/schemas/Identifier'
         requestId:
+          description: 요청 본문의 `requestId`를 그대로 돌려준다. 클라이언트는 다른 값이 오면 응답을 `INDETERMINATE`로 버린다.
           $ref: '#/components/schemas/Identifier'
         outcome:
           $ref: '#/components/schemas/EvaluatedOutcome'
@@ -811,6 +822,7 @@ components:
         reservationId:
           $ref: '#/components/schemas/Identifier'
         requestId:
+          description: 요청 본문의 `requestId`를 그대로 돌려준다. 클라이언트는 다른 값이 오면 응답을 `INDETERMINATE`로 버린다.
           $ref: '#/components/schemas/Identifier'
         previousState:
           $ref: '#/components/schemas/ReservationState'
@@ -951,7 +963,7 @@ x-legacy-ingestion-compat:
       legacy: 금지 키(prompt, system_prompt, completion, messages, content, response)는 어떤 모드에서도 저장하지 않음. 기본 모드는 제거 후 저장하고, 엄격 모드만 400. 형식 위반은 기본 모드에서 경고 로그만 남기고 통과(엄격 모드는 계약과 같은 규칙으로 거부)
     - topic: 오류 코드
       contract: INVALID_REQUEST, UNAUTHORIZED, NOT_FOUND, IDEMPOTENCY_CONFLICT, RATE_LIMITED, CONTROL_PLANE_UNAVAILABLE
-      legacy: COMMON-400, COMMON-401, COMMON-403, COMMON-404, INGESTION-409, INGESTION-413, INGESTION-503
+      legacy: COMMON-400, COMMON-401, COMMON-403, COMMON-404, COMMON-405, INGESTION-409, INGESTION-413, COMMON-415, INGESTION-503
     - topic: 오류 응답의 data.outcome
       contract: INDETERMINATE 또는 CONTROL_PLANE_UNAVAILABLE
       legacy: 없음

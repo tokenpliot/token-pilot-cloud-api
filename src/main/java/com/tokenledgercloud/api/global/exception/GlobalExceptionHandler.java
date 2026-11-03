@@ -6,6 +6,9 @@ import java.util.List;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.FieldError;
+import org.springframework.web.ErrorResponse;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -54,11 +57,29 @@ public class GlobalExceptionHandler {
 			.body(ApiResponse.error(ErrorCode.INVALID_INPUT.getCode(), ErrorCode.INVALID_INPUT.getMessage()));
 	}
 
+	// A wrong HTTP method or Content-Type is a client error with its own status, not the 500 fallback below.
+	// The Allow / Accept headers Spring computed are kept so the client can see what is supported.
+	@ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+	public ResponseEntity<ApiResponse<Void>> handleMethodNotSupported(HttpRequestMethodNotSupportedException exception) {
+		return frameworkError(exception, ErrorCode.METHOD_NOT_ALLOWED);
+	}
+
+	@ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+	public ResponseEntity<ApiResponse<Void>> handleMediaTypeNotSupported(HttpMediaTypeNotSupportedException exception) {
+		return frameworkError(exception, ErrorCode.UNSUPPORTED_MEDIA_TYPE);
+	}
+
 	@ExceptionHandler(Exception.class)
 	public ResponseEntity<ApiResponse<Void>> handleUnexpectedException(Exception exception) {
 		log.error("Unhandled exception occurred", exception);
 		return ResponseEntity.status(ErrorCode.INTERNAL_SERVER_ERROR.getStatus())
 			.body(ApiResponse.error(ErrorCode.INTERNAL_SERVER_ERROR.getCode(), ErrorCode.INTERNAL_SERVER_ERROR.getMessage()));
+	}
+
+	private ResponseEntity<ApiResponse<Void>> frameworkError(ErrorResponse exception, ErrorCode errorCode) {
+		return ResponseEntity.status(errorCode.getStatus())
+			.headers(exception.getHeaders())
+			.body(ApiResponse.error(errorCode.getCode(), errorCode.getMessage()));
 	}
 
 	private ApiFieldError toApiFieldError(FieldError fieldError) {

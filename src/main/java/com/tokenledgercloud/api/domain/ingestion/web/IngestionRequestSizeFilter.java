@@ -11,9 +11,7 @@ import java.time.LocalDateTime;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
-import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
-import org.springframework.web.util.UrlPathHelper;
 
 import com.tokenledgercloud.api.domain.ingestion.config.IngestionProperties;
 import com.tokenledgercloud.api.global.exception.ErrorCode;
@@ -36,12 +34,6 @@ import jakarta.servlet.http.HttpServletResponse;
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 10)
 public class IngestionRequestSizeFilter extends OncePerRequestFilter {
-
-	static final String EVENT_PATH = "/api/ingestion/events";
-	static final String BATCH_PATH = "/api/ingestion/events/batch";
-	static final String OBSERVE_EVENT_PATH = "/api/v2/observe/events";
-
-	private static final UrlPathHelper URL_PATH_HELPER = UrlPathHelper.defaultInstance;
 
 	private final IngestionProperties properties;
 
@@ -75,16 +67,12 @@ public class IngestionRequestSizeFilter extends OncePerRequestFilter {
 
 	/** The byte limit for this request's path, or -1 when the path is not an ingestion endpoint. */
 	private int limitFor(HttpServletRequest request) {
-		// Compare the path the way Spring MVC will match it: percent-decoded, ";param" and "//" removed, dot
-		// segments resolved. The raw request URI would let e.g. /api/ingestion/even%74s skip the limit.
-		String path = StringUtils.cleanPath(URL_PATH_HELPER.getPathWithinApplication(request));
-		if (path.length() > 1 && path.endsWith("/")) {
-			path = path.substring(0, path.length() - 1);
-		}
-		if (EVENT_PATH.equals(path) || OBSERVE_EVENT_PATH.equals(path)) {
+		// Compare the normalized path, not the raw URI: /api/ingestion/even%74s must not skip the limit.
+		String path = IngestionPaths.normalizedPath(request);
+		if (IngestionPaths.EVENT_PATH.equals(path) || IngestionPaths.OBSERVE_EVENT_PATH.equals(path)) {
 			return properties.maxEventBytes();
 		}
-		if (BATCH_PATH.equals(path)) {
+		if (IngestionPaths.BATCH_PATH.equals(path)) {
 			return properties.maxBatchBytes();
 		}
 		return -1;

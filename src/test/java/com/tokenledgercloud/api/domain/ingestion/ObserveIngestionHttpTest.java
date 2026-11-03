@@ -7,6 +7,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -18,7 +19,9 @@ import org.springframework.boot.test.system.OutputCaptureExtension;
 /**
  * 실제 Tomcat 위에서만 확인할 수 있는 수집 API의 바깥쪽 동작.
  * - 읽을 수 없는 요청 본문(날짜 형식 오류, 깨진 JSON)은 500이 아니라 400(COMMON-400)이고, 보낸 값이 응답·로그에 남지 않는다.
- * - 퍼센트 인코딩한 경로로 보내도 본문 크기 제한(413)을 피할 수 없다. (MockMvc는 경로 디코딩을 거치지 않아 여기서 확인한다)
+ * - 퍼센트 인코딩한 경로로 보내도 본문 크기 제한(413)을 피할 수 없고, 회원 키 필터에 막히지 않고 프로젝트 키 검증까지 간다.
+ *   (MockMvc는 경로 디코딩을 거치지 않아 여기서 확인한다)
+ * - 허용되지 않은 메서드·Content-Type은 500이 아니라 405(COMMON-405)·415(COMMON-415)다.
  * 본문 해석과 크기 제한은 프로젝트 키 검증보다 먼저 일어나므로 키 검증을 가짜로 바꿀 필요가 없다.
  * 201/200/413 기본 동작과 꺼진 상태의 404는 ObserveIngestionHttpIntegrationTest, ObserveIngestionDisabledTest가 맡는다.
  */
@@ -60,13 +63,20 @@ class ObserveIngestionHttpTest {
 
 	// 지정한 경로(인코딩된 그대로)로 JSON을 POST한다.
 	private HttpResponse<String> post(String rawPath, String json) throws Exception {
-		HttpRequest request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + rawPath))
+		return send("POST", rawPath, "application/json", json, "test-key");
+	}
+
+	// apiKey가 null이면 X-API-Key 헤더를 보내지 않는다.
+	private HttpResponse<String> send(String method, String rawPath, String contentType, String body, String apiKey)
+		throws Exception {
+		HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + rawPath))
 			.timeout(Duration.ofSeconds(20))
-			.header("Content-Type", "application/json")
-			.header("X-API-Key", "test-key")
-			.POST(HttpRequest.BodyPublishers.ofString(json))
-			.build();
-		return client.send(request, HttpResponse.BodyHandlers.ofString());
+			.header("Content-Type", contentType)
+			.method(method, HttpRequest.BodyPublishers.ofString(body));
+		if (apiKey != null) {
+			request.header("X-API-Key", apiKey);
+		}
+		return client.send(request.build(), HttpResponse.BodyHandlers.ofString());
 	}
 
 	@Test
@@ -104,5 +114,36 @@ class ObserveIngestionHttpTest {
 		String oversized = eventJson("http-big").replaceFirst("\\}\\s*$", ", \"note\": \"" + "x".repeat(3000) + "\" }");
 
 		assertThat(post("/api/v2/observe/%65vents", oversized).statusCode()).isEqualTo(413);
+	}
+
+	@Test
+	void encodedPathIsAuthenticatedWithTheProjectKeyNotTheMemberKey() throws Exception {
+		// 회원 키 필터가 이 경로를 다른 경로로 보면 "test-key"를 회원 키로 거부한다(본문에 COMMON-401 없음).
+		// 서비스의 프로젝트 키 검증까지 가야 COMMON-401과 프로젝트 키 문구가 나온다.
+		HttpResponse<String> response = post("/api/v2/observe/%65vents", eventJson("http-encoded"));
+
+		assertThat(response.statusCode()).isEqualTo(401);
+		assertThat(response.body()).contains("\"code\":\"COMMON-401\"").contains("Invalid project API key.");
+	}
+
+	@Test
+	void unsupportedMethodIs405WithAllowHeader() throws Exception {
+		// 키 없이 보낸다. POST가 아닌 요청의 X-API-Key는 회원 키로 검사되어 405보다 먼저 401이 된다.
+		HttpResponse<String> response = send("PUT", "/api/v2/observe/events", "application/json", eventJson("http-put"),
+			null);
+
+		assertThat(response.statusCode()).isEqualTo(405);
+		assertThat(response.body()).contains("\"code\":\"COMMON-405\"");
+		assertThat(response.headers().firstValue("Allow")).hasValue("POST");
+	}
+
+	@Test
+	void unsupportedContentTypeIs415OnV1AndV2() throws Exception {
+		for (String path : List.of("/api/v2/observe/events", "/api/ingestion/events")) {
+			HttpResponse<String> response = send("POST", path, "text/plain", eventJson("http-text"), "test-key");
+
+			assertThat(response.statusCode()).as(path).isEqualTo(415);
+			assertThat(response.body()).as(path).contains("\"code\":\"COMMON-415\"");
+		}
 	}
 }
