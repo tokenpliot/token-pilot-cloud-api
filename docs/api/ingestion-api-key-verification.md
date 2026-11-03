@@ -54,7 +54,7 @@
 실제 HTTP에서 요청이 거치는 순서는 다음과 같다.
 
 1. 크기 필터: 한도 초과는 `413` (`INGESTION-413`)
-2. Spring Security: 회원용 `ApiKeyAuthenticationFilter`는 두 ingestion POST 경로(`/api/ingestion/events`, `/api/ingestion/events/batch`)를 건너뛴다(#9). `X-API-Key`는 회원 키로 검사되지 않고 4에서 프로젝트 키로만 검사된다.
+2. Spring Security: 회원용 `ApiKeyAuthenticationFilter`는 ingestion POST 경로(`/api/ingestion/events`, `/api/ingestion/events/batch`, `/api/v2/observe/events`)를 건너뛴다(#9). `X-API-Key`는 회원 키로 검사되지 않고 4에서 프로젝트 키로만 검사된다. 경로는 크기 필터와 같은 `IngestionPaths` 규칙(퍼센트 디코딩, 후행 슬래시 제거 등 Spring MVC가 라우팅하는 형태)으로 비교한다.
 3. 요청 검증: `schemaVersion` 등은 `400` (`COMMON-400`). metadata 금지 키는 엄격 모드에서만 `400`이고 기본 모드는 제거 후 통과
 4. 서비스의 프로젝트 키 검증(위 1절)
 5. (배치) 항목별 검증과 저장
@@ -73,7 +73,7 @@
 
 ### 해결됨: 프로젝트 키가 실제 HTTP에서 거부되던 문제 (#9)
 
-회원용 `ApiKeyAuthenticationFilter`가 모든 `X-API-Key`를 회원 키로 검사해서 유효한 프로젝트 키도 `401`이 되던 문제는 #9에서 두 ingestion POST 경로를 이 필터에서 제외해 해결했다. 필터는 원본 URI를 정확히 비교하므로, 인코딩·후행 슬래시 등 변형 경로는 필터를 건너뛰지 않고 회원 키 검사로 `401`이 된다(닫힌 쪽으로 실패). `IngestionAuthOrderHttpTest`가 현재 동작을 고정한다.
+회원용 `ApiKeyAuthenticationFilter`가 모든 `X-API-Key`를 회원 키로 검사해서 유효한 프로젝트 키도 `401`이 되던 문제는 #9에서 ingestion POST 경로를 이 필터에서 제외해 해결했다. 처음에는 원본 URI를 정확히 비교해서 `/api/v2/observe/%65vents`처럼 같은 컨트롤러로 가는 변형 경로는 회원 키 검사로 `401`이 되었다. 크기 필터는 이미 정규화한 경로로 비교하고 있어서 두 필터가 같은 요청을 다른 경로로 보는 상태였다. 이제 두 필터가 `IngestionPaths`를 함께 쓴다. 회원 키 필터를 건너뛰어도 프로젝트 키 검증은 서비스에서 반드시 일어나고 프로젝트 키는 회원 권한을 얻지 않는다. `ObserveIngestionHttpTest`가 실제 Tomcat에서 이 동작을 확인한다.
 
 ## 4. 테스트 대응
 

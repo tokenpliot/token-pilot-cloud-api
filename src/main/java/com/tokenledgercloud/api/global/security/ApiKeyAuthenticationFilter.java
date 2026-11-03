@@ -1,5 +1,6 @@
 package com.tokenledgercloud.api.global.security;
 
+import com.tokenledgercloud.api.domain.ingestion.web.IngestionPaths;
 import com.tokenledgercloud.api.domain.member.entity.Member;
 import com.tokenledgercloud.api.domain.apikey.service.ApiKeyService;
 import jakarta.servlet.FilterChain;
@@ -30,10 +31,8 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
     protected boolean shouldNotFilter(HttpServletRequest request) {
         // These endpoints authenticate project_api_keys in their own services.
         // The member api_keys namespace must not intercept their X-API-Key header.
-        String path = request.getRequestURI().substring(request.getContextPath().length());
-        return "POST".equals(request.getMethod())
-                && ("/api/ingestion/events".equals(path) || "/api/ingestion/events/batch".equals(path)
-                        || "/api/v2/observe/events".equals(path));
+        // Paths are compared the way Spring MVC routes them, so /api/v2/observe/%65vents is skipped too.
+        return IngestionPaths.isIngestionPost(request);
     }
 
     @Override
