@@ -4,6 +4,8 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
 import java.util.List;
 
@@ -47,10 +49,23 @@ public class ObserveLedgerQueryService {
 	// 새 원장의 확정 지출과 반영되지 않은 건수를 읽는 저장소.
 	private final LedgerSpendRepository ledgerSpendRepository;
 
-	/** 수집 지연: 마지막으로 받은 시각과 미정산 건수를 돌려준다. now는 지난 시간 계산 기준이다. */
+	/** 수집 지연. 수신 시각(created_at)은 서버(JVM) 시간대로 저장되므로 그 시간대로 해석한다. */
 	@Transactional(readOnly = true)
 	public IngestionLagResponse getIngestionLag(String organizationId, String projectId, String environment,
 			LedgerPeriod period, LocalDateTime now) {
+		return getIngestionLag(organizationId, projectId, environment, period, now, ZoneId.systemDefault());
+	}
+
+	/**
+	 * 수집 지연: 이벤트가 발생한 뒤 서버에 도착하기까지 걸린 시간(최대·평균)과, 마지막 수신 후 지난 시간, 미정산 건수를 돌려준다.
+	 * 발생 시각은 UTC, 수신 시각은 receivedZone으로 저장되어 있어서, 수신 시각을 UTC로 바꾼 뒤 뺀다.
+	 *
+	 * @param now          지난 시간 계산 기준. 수신 시각과 같은 시간대(receivedZone)여야 한다.
+	 * @param receivedZone usage_events.created_at이 저장된 시간대 (운영에서는 JVM 기본 시간대)
+	 */
+	@Transactional(readOnly = true)
+	public IngestionLagResponse getIngestionLag(String organizationId, String projectId, String environment,
+			LedgerPeriod period, LocalDateTime now, ZoneId receivedZone) {
 		// 프로젝트가 이 조직 소유인지 먼저 확인한다.
 		requireProject(organizationId, projectId);
 		String env = blankToNull(environment);
@@ -63,8 +78,29 @@ public class ObserveLedgerQueryService {
 		Long seconds = row.getLastReceivedAt() == null
 				? null
 				: Math.max(0L, Duration.between(row.getLastReceivedAt(), now).getSeconds());
+		// 발생→수신 지연을 이벤트마다 계산해 최대와 평균을 낸다. 이벤트가 없으면 0초로 위장하지 않고 null이다.
+		long maxDelay = 0L;
+		long totalDelay = 0L;
+		long delayCount = 0L;
+		for (var delayRow : queryRepository.findDelayRows(organizationId, projectId, env, period.from(), period.to())) {
+			LocalDateTime receivedUtc = toUtc(delayRow.getReceivedAt(), receivedZone);
+			// 클라이언트 시계가 빨라서 발생 시각이 수신보다 늦게 찍힌 경우는 지연 0으로 본다.
+			long delay = Math.max(0L, Duration.between(delayRow.getOccurredAt(), receivedUtc).getSeconds());
+			maxDelay = Math.max(maxDelay, delay);
+			totalDelay += delay;
+			delayCount++;
+		}
+		Long maxDelaySeconds = delayCount == 0 ? null : maxDelay;
+		Long averageDelaySeconds = delayCount == 0 ? null : totalDelay / delayCount;
+		// 응답의 두 시각은 모두 UTC로 맞춘다. (발생 시각은 원래 UTC다)
 		return new IngestionLagResponse(projectId, env, period.from(), period.to(),
-				eventCount, unsettled, row.getLastReceivedAt(), row.getLastOccurredAt(), seconds);
+				eventCount, unsettled, toUtc(row.getLastReceivedAt(), receivedZone), row.getLastOccurredAt(), seconds,
+				maxDelaySeconds, averageDelaySeconds);
+	}
+
+	// 서버 시간대로 저장된 시각을 UTC로 바꾼다. null은 그대로 null이다.
+	private static LocalDateTime toUtc(LocalDateTime local, ZoneId zone) {
+		return local == null ? null : local.atZone(zone).withZoneSameInstant(ZoneOffset.UTC).toLocalDateTime();
 	}
 
 	/** 미귀속 비용: 격리된 이벤트 수와, 그 이벤트의 최신 실제 확정 금액 합계를 돌려준다. */
