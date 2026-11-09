@@ -66,10 +66,53 @@ class ControlPlaneOpenApiContractTest {
 
 		assertThat(errorExamples).isNotEmpty();
 		for (Example example : errorExamples) {
-			DecisionOutcome outcome = DecisionOutcome.valueOf(example.value().at("/data/outcome").asText());
+			assertThat(DecisionOutcome.forErrorStatus(example.status()).isPolicyDenial()).as(example.location()).isFalse();
+			JsonNode outcomeNode = example.value().at("/data/outcome");
+			if (outcomeNode.isMissingNode()) {
+				// 경로 미등록 404만 본문에 outcome이 없다. 클라이언트는 상태코드만으로 판정한다.
+				assertThat(example.schemaRef().get("$ref").asText()).as(example.location())
+					.isEqualTo("#/components/schemas/RouteNotFoundEnvelope");
+				continue;
+			}
+			DecisionOutcome outcome = DecisionOutcome.valueOf(outcomeNode.asText());
 			assertThat(outcome.isPolicyDenial()).as(example.location()).isFalse();
 			assertThat(outcome).as(example.location()).isEqualTo(DecisionOutcome.forErrorStatus(example.status()));
 		}
+	}
+
+	@Test
+	void disabledDecisionApiIsDocumentedAs404MappedToIndeterminate() {
+		JsonNode notFound = spec.at("/paths").get("/api/control/v1/decisions").at("/post/responses/404");
+
+		assertThat(notFound.get("$ref").asText()).isEqualTo("#/components/responses/DecisionApiDisabled");
+		assertThat(DecisionOutcome.forErrorStatus(404)).isEqualTo(DecisionOutcome.INDETERMINATE);
+	}
+
+	@Test
+	void retryAtIsDistinctFromOverloadRetryAfter() {
+		JsonNode decision = spec.at("/components/schemas/DecisionResponse/properties");
+
+		assertThat(decision.has("retryAt")).isTrue();
+		assertThat(decision.has("retryAfter")).isFalse();
+		assertThat(decision.has("retryAfterSeconds")).isFalse();
+	}
+
+	@Test
+	void newDecisionFieldsAreOptionalSoOlderClientsKeepWorking() {
+		JsonNode required = spec.at("/components/schemas/DecisionResponse/required");
+		List<String> names = new ArrayList<>();
+		required.forEach(node -> names.add(node.asText()));
+
+		assertThat(names).doesNotContain("policies", "requiredCostUsd", "remainingMonthlyBudgetUsd", "retryAt");
+	}
+
+	@Test
+	void reasonCodesProducedByTheEvaluatorAreDocumented() {
+		String description = spec.at("/components/schemas/DecisionReason/description").asText();
+
+		assertThat(description).contains("MONTHLY_BUDGET_EXCEEDED", "REQUEST_COST_LIMIT_EXCEEDED",
+			"MONTHLY_SOFT_LIMIT_EXCEEDED", "REQUEST_COST_SOFT_LIMIT_EXCEEDED", "POLICY_INACTIVE",
+			"POLICY_NOT_CONFIGURED", "PRICING_NOT_FOUND", "PRICING_UNAVAILABLE");
 	}
 
 	@Test
