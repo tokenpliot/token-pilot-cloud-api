@@ -84,3 +84,5 @@ jwt:
 #       rate-unit-tokens: 0         # tokens per pricing_plans rate (e.g. 1000000). 0 = unconfirmed: every event is
 #                                   # recorded UNPRICED. Changing it after events were priced conflicts with stored
 #                                   # snapshots of the same plan version (events become UNPRICED) until the plan version is bumped
+#   decision:
+#     enabled: false              # true registers POST /api/control/v1/decisions (otherwise 404); needs observe.ingestion.rate-unit-tokens > 0 to price
