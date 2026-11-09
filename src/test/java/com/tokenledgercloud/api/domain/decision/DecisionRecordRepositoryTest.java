@@ -63,7 +63,7 @@ class DecisionRecordRepositoryTest {
 	}
 
 	private DecisionRecord record(String projectId, String contextId, String idempotencyKey) {
-		return DecisionRecord.of("org-1", projectId, "key-" + projectId, contextId, idempotencyKey, "f".repeat(64),
+		return DecisionRecord.of(DecisionRecord.newId(), "org-1", projectId, "key-" + projectId, contextId, idempotencyKey, "f".repeat(64),
 			EnforcementMode.ADVISORY, DecisionOutcome.ALLOW, "advisory-v1", LocalDateTime.of(2026, 11, 9, 12, 0),
 			"{\"estimatedInputTokens\":1000}", "{\"outcome\":\"ALLOW\"}");
 	}

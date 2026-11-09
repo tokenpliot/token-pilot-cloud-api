@@ -53,14 +53,23 @@ public class DecisionRecord {
 
 	/** decisionId로 응답에 내보내는 값. */
 	public String decisionId() {
+		return decisionIdOf(id);
+	}
+
+	public static String newId() {
+		return UUID.randomUUID().toString();
+	}
+
+	public static String decisionIdOf(String id) {
 		return "dec-" + id;
 	}
 
-	public static DecisionRecord of(String organizationId, String projectId, String apiKeyId, String policyRequestContextId,
+	/** @param id {@link #newId()}로 만든 값. 응답의 decisionId를 저장 전에 알 수 있게 호출자가 만든다. */
+	public static DecisionRecord of(String id, String organizationId, String projectId, String apiKeyId, String policyRequestContextId,
 		String idempotencyKey, String requestFingerprint, EnforcementMode clientMode, DecisionOutcome outcome,
 		String algorithmVersion, LocalDateTime evaluatedAtUtc, String evaluationInputJson, String responseJson) {
 		DecisionRecord record = new DecisionRecord();
-		record.id = UUID.randomUUID().toString();
+		record.id = id;
 		record.organizationId = organizationId;
 		record.projectId = projectId;
 		record.apiKeyId = apiKeyId;

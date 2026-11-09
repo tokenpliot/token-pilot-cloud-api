@@ -39,3 +39,11 @@
 | N' | 응답 필드 이름은 `requiredCostUsd`, `remainingMonthlyBudgetUsd`, `retryAt`이다. 필드를 추가하자는 것은 팀장님 의견이고, 이름은 제안이다. SDK는 아직 200 응답에서 이 값들을 읽지 않는다. | yaml `DecisionResponse` |
 | R | `remainingMonthlyBudgetUsd`는 이번 요청 전 기준, 평가한 활성 범위 중 가장 작은 월 hard 한도 잔액이다(음수면 0). | `AdvisoryEvaluator`, yaml |
 | S | soft 요청당 한도 reason 이름을 `REQUEST_COST_SOFT_LIMIT_EXCEEDED`로 정했다. hard 쪽 이름 변경에 맞춘 것이다. | `AdvisoryEvaluator`, yaml |
+| T | 월 지출은 `LedgerSpendRepository.sumConfirmedSpend`(최신 개정본이 ACTUAL·PRICED인 금액)만 쓴다. `LEGACY_UNVERIFIED`(기존 v1 ingestion) 행, 가격 미상·미정산(`UNSETTLED`) 행, 격리(`QUARANTINED`) 행은 빠진다. **v1 수집만 쓰는 고객은 월 지출이 실제보다 적게 잡혀 남은 예산이 크게 나오고, 월 한도 거부 권고가 늦게 나온다.** | `DecisionService` |
+| U | `PolicyContextService.capture`가 `projects` 행을 `SELECT ... FOR UPDATE`로 잠그므로, **같은 프로젝트의 판정은 capture 구간에서 하나씩 직렬화된다.** 파일럿 규모를 가정했고 처리량은 측정하지 않았다(#14 설계가 #15/#17로 넘긴 항목). | `PolicyContextService`, `DecisionService` |
+| V | 판정 키 인증에 `ProjectApiKeyAuthenticator.authenticate(rawApiKey, environment)` 오버로드를 추가했다. 본문에 `projectKey`가 없으므로 키의 프로젝트를 쓰고, 만료·환경·ACTIVE 검사는 기존과 같다. 수집 코드 파일을 건드린다. | `ProjectApiKeyAuthenticator` |
+| W | 가격 단위는 Observe와 같은 `token-pilot.observe.ingestion.rate-unit-tokens`를 쓴다. 0이면 모든 판정이 `INDETERMINATE`(`PRICING_UNAVAILABLE`)다. | `DecisionService` |
+| X | 동시 요청이 유니크 위반으로 부딪혔는데 이긴 행을 찾지 못하면 `503`(현재 `INGESTION_RETRY_LATER`)이다. C5에서 계약의 `CONTROL_PLANE_UNAVAILABLE`과 `Retry-After`로 바꾼다. | `DecisionService`, C5 |
+| Y | 같은 requestId의 context가 이미 있는데 가격이 묶이지 않았으면, 지금 가격이 있어도 묶인 snapshot을 바꾸지 않고 `PRICING_UNAVAILABLE`(`PRICE_NOT_BOUND`)로 판정한다. | `DecisionService` |
+| Z | `decision_records`에 보존 기간이나 삭제 정책이 없다. 호출 한 건마다 JSON 두 개가 담긴 행이 쌓인다. | V8 |
+| Z2 | 계약의 `environment`는 128자까지 허용하지만 DB와 정책 쪽은 20자다. 등록된 환경만 통과하므로 그대로 두었고, 21자 이상은 판정이 아니라 오류가 된다. | V7, 계약 |

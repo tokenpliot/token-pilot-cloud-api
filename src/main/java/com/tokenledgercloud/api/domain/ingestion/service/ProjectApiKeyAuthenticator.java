@@ -53,6 +53,25 @@ public class ProjectApiKeyAuthenticator {
 
 	@Transactional
 	public AuthenticatedProjectApiKey authenticate(String rawApiKey, String projectKey, String environment) {
+		ProjectApiKey apiKey = findValidKey(rawApiKey, environment);
+		Project project = validateProject(apiKey, projectKey);
+		return markUsed(apiKey, project);
+	}
+
+	/**
+	 * Same checks for an endpoint whose body carries no projectKey (the control-plane decision API): the project is
+	 * the key's own project. Missing 404, not ACTIVE 403, as above.
+	 */
+	@Transactional
+	public AuthenticatedProjectApiKey authenticate(String rawApiKey, String environment) {
+		ProjectApiKey apiKey = findValidKey(rawApiKey, environment);
+		Project project = projectRepository.findByIdAndOrganizationId(apiKey.getProjectId(), apiKey.getOrganizationId())
+			.orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND, "Project was not found for this API key."));
+		validateActive(project);
+		return markUsed(apiKey, project);
+	}
+
+	private ProjectApiKey findValidKey(String rawApiKey, String environment) {
 		if (rawApiKey == null || rawApiKey.isBlank()) {
 			throw new ApiException(ErrorCode.UNAUTHORIZED, "Project API key is required.");
 		}
@@ -66,8 +85,10 @@ public class ProjectApiKeyAuthenticator {
 
 		validateExpiration(apiKey);
 		validateEnvironment(apiKey, environment);
-		Project project = validateProject(apiKey, projectKey);
+		return apiKey;
+	}
 
+	private AuthenticatedProjectApiKey markUsed(ProjectApiKey apiKey, Project project) {
 		apiKey.setLastUsedAt(LocalDateTime.now());
 
 		return new AuthenticatedProjectApiKey(
@@ -113,10 +134,14 @@ public class ProjectApiKeyAuthenticator {
 		if (!project.getId().equals(apiKey.getProjectId())) {
 			throw new ApiException(ErrorCode.FORBIDDEN, "Project API key is not allowed for this project.");
 		}
+		validateActive(project);
+
+		return project;
+	}
+
+	private void validateActive(Project project) {
 		if (project.getStatus() != ProjectStatus.ACTIVE) {
 			throw new ApiException(ErrorCode.FORBIDDEN, "Project is not active.");
 		}
-
-		return project;
 	}
 }
