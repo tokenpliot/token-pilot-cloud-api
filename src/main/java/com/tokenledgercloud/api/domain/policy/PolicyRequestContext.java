@@ -21,7 +21,7 @@ public class PolicyRequestContext {
 	@Column(name = "organization_id", nullable = false, length = 36) private String organizationId;
 	@Column(name = "project_id", nullable = false, length = 36) private String projectId;
 	@Column(nullable = false, length = 20) private String environment;
-	@Column(name = "request_id", nullable = false, length = 100) private String requestId;
+	@Column(name = "request_id", nullable = false, length = 128) private String requestId;
 	@Column(name = "project_policy_snapshot_id", length = 36) private String projectPolicySnapshotId;
 	@Column(name = "environment_policy_snapshot_id", length = 36) private String environmentPolicySnapshotId;
 	@Column(name = "pricing_snapshot_id", length = 36) private String pricingSnapshotId;

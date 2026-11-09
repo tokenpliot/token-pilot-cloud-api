@@ -22,6 +22,9 @@ import lombok.RequiredArgsConstructor;
 @Service
 @RequiredArgsConstructor
 public class PolicyContextService {
+	/** Same limit as the control-plane contract's Identifier (control-plane-v1.yaml). */
+	static final int MAX_REQUEST_ID_LENGTH = 128;
+
 	private final PolicyAccess access;
 	private final ProjectRepository projects;
 	private final CustomerPolicyRepository policies;
@@ -79,7 +82,7 @@ public class PolicyContextService {
 
 	private void validateRequest(String environment, String requestId) {
 		PolicyService.validateEnvironment(environment);
-		if (environment == null || requestId == null || requestId.isBlank() || requestId.length() > 100 || !requestId.equals(requestId.strip())) {
+		if (environment == null || requestId == null || requestId.isBlank() || requestId.length() > MAX_REQUEST_ID_LENGTH || !requestId.equals(requestId.strip())) {
 			throw new ApiException(ErrorCode.INVALID_INPUT);
 		}
 	}
