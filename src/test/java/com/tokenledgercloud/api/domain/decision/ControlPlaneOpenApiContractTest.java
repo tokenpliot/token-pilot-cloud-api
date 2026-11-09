@@ -71,7 +71,7 @@ class ControlPlaneOpenApiContractTest {
 			if (outcomeNode.isMissingNode()) {
 				// 경로 미등록 404만 본문에 outcome이 없다. 클라이언트는 상태코드만으로 판정한다.
 				assertThat(example.schemaRef().get("$ref").asText()).as(example.location())
-					.isEqualTo("#/components/schemas/RouteNotFoundEnvelope");
+					.isEqualTo("#/components/schemas/PlainErrorEnvelope");
 				continue;
 			}
 			DecisionOutcome outcome = DecisionOutcome.valueOf(outcomeNode.asText());

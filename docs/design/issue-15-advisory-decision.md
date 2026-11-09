@@ -47,3 +47,11 @@
 | Y | 같은 requestId의 context가 이미 있는데 가격이 묶이지 않았으면, 지금 가격이 있어도 묶인 snapshot을 바꾸지 않고 `PRICING_UNAVAILABLE`(`PRICE_NOT_BOUND`)로 판정한다. | `DecisionService` |
 | Z | `decision_records`에 보존 기간이나 삭제 정책이 없다. 호출 한 건마다 JSON 두 개가 담긴 행이 쌓인다. | V8 |
 | Z2 | 계약의 `environment`는 128자까지 허용하지만 DB와 정책 쪽은 20자다. 등록된 환경만 통과하므로 그대로 두었고, 21자 이상은 판정이 아니라 오류가 된다. | V7, 계약 |
+| AA | 계약에 없던 `403` 응답(`Forbidden`)을 decisions에 추가했다. 키가 이 환경에서 쓸 수 없거나 프로젝트가 보관된 경우이며, 정책 거부가 아니라 `data.outcome: INDETERMINATE`다. 기존 인증기가 이미 403을 내던 경우를 계약에 옮긴 것이다. | yaml, `ControlPlaneExceptionHandler` |
+| AB | 계약에 없던 `413` 응답(`PayloadTooLarge`)을 decisions에 추가했다. 본문이 단건 한도(`token-pilot.ingestion.max-event-bytes`, 기본 16384바이트)를 넘으면 인증과 JSON 파싱 전에 필터가 거부한다. 판정 요청에 별도 한도를 두지 않고 수집 단건 한도를 재사용했다. | yaml, `IngestionRequestSizeFilter` |
+| AC | 기존 `ApiFieldError`(`field`, `rejectedValue`, `reason`)는 계약의 `{field, message}`와 맞지 않아 쓰지 않고 판정 전용 오류 필드 타입(`ControlPlaneErrorResponse.FieldError`)을 만들었다. 다른 API의 오류 응답은 바꾸지 않았다. 거부된 값은 응답에 싣지 않는다. | `ControlPlaneErrorResponse` |
+| AD | C1에서 만든 스키마 이름 `RouteNotFoundEnvelope`를 `PlainErrorEnvelope`로 바꿨다. `404`(경로 미등록)뿐 아니라 `413`처럼 필터·프레임워크가 만드는 `data`/`data.outcome` 없는 오류를 함께 설명하기 위해서다. 아직 배포된 계약이 아니라 호환 문제는 없다고 보았다. | yaml, 계약 테스트 |
+| AE | `429 RATE_LIMITED`는 계약에 있지만 이번 PR에서 구현하지 않았다. 서버에 속도 제한 자체가 없다. 판정 호출이 몰릴 때의 보호는 별도 작업이 필요하다(`capture`의 프로젝트 행 잠금 직렬화는 U 참고). | 계약, 후속 작업 |
+| AF | 판정 컨트롤러에서 예상하지 못한 예외(버그)는 계약의 `503 CONTROL_PLANE_UNAVAILABLE`이 아니라 전역 처리기의 `500`(`data` 없음)으로 나간다. 저장소 장애(`DataAccessException`, `TransactionException`)와 동시 요청 충돌 미해결만 `503`+`Retry-After`다. SDK는 5xx를 모두 같은 장애로 다룬다. | `ControlPlaneExceptionHandler` |
+| AG | 크기 필터가 판정 경로에 항상 적용되므로, 기능 플래그가 꺼져 있어도 큰 본문은 `404`가 아니라 `413`을 받는다. SDK는 둘 다 4xx로 `INDETERMINATE`로 다룬다. | `IngestionRequestSizeFilter` |
+| AH | `;`나 `//`가 든 경로는 Spring Security 방화벽이 필터 체인 앞에서 400으로 거부한다. 수집·정책 API도 같다. 끝 슬래시(`/decisions/`)는 컨트롤러에 연결되지 않아 404다. 모두 판정 API만의 동작이 아니며 SDK가 보내는 경로에는 해당하지 않는다. | 테스트 `DecisionApiHttpTest` |

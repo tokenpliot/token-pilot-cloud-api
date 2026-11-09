@@ -16,6 +16,8 @@ public final class IngestionPaths {
 	public static final String EVENT_PATH = "/api/ingestion/events";
 	public static final String BATCH_PATH = "/api/ingestion/events/batch";
 	public static final String OBSERVE_EVENT_PATH = "/api/v2/observe/events";
+	/** Control-plane decision endpoint. It also authenticates with a project API key, but is not an ingestion endpoint. */
+	public static final String DECISION_PATH = "/api/control/v1/decisions";
 
 	private static final UrlPathHelper URL_PATH_HELPER = UrlPathHelper.defaultInstance;
 
@@ -42,5 +44,16 @@ public final class IngestionPaths {
 		}
 		String path = normalizedPath(request);
 		return EVENT_PATH.equals(path) || BATCH_PATH.equals(path) || OBSERVE_EVENT_PATH.equals(path);
+	}
+
+	/**
+	 * Whether this is a POST to an endpoint that authenticates with a project API key in its own service: the ingestion
+	 * endpoints and the control-plane decision endpoint. The member api_keys filter must not intercept their X-API-Key.
+	 */
+	public static boolean isProjectKeyPost(HttpServletRequest request) {
+		if (isIngestionPost(request)) {
+			return true;
+		}
+		return "POST".equals(request.getMethod()) && DECISION_PATH.equals(normalizedPath(request));
 	}
 }

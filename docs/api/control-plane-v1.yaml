@@ -205,10 +205,14 @@ paths:
           $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/DecisionApiDisabled'
         '409':
           $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
         '503':
@@ -498,6 +502,39 @@ components:
                   outcome: INDETERMINATE
                 errors: []
                 timestamp: "2026-10-02T21:00:12"
+    Forbidden:
+      description: 키가 이 환경·프로젝트에서 쓸 수 없음(환경 제한 불일치, 보관된 프로젝트). 정책 거부가 아니다. 클라이언트는 `INDETERMINATE`로 취급한다.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          examples:
+            environmentMismatch:
+              value:
+                success: false
+                code: FORBIDDEN
+                message: Project API key is not allowed for this environment.
+                data:
+                  outcome: INDETERMINATE
+                errors: []
+                timestamp: "2026-10-02T21:00:17"
+    PayloadTooLarge:
+      description: |
+        본문이 크기 한도(기본 16384바이트, `token-pilot.ingestion.max-event-bytes`)를 넘음. 인증과 JSON 파싱 전에 필터가 거부하므로
+        `data`가 없다. 클라이언트는 상태코드만으로 `INDETERMINATE`로 취급한다.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/PlainErrorEnvelope'
+          examples:
+            tooLarge:
+              value:
+                success: false
+                code: INGESTION-413
+                message: Request body exceeds the limit of 16384 bytes.
+                data: null
+                errors: []
+                timestamp: "2026-10-02T21:00:18"
     DecisionApiDisabled:
       description: |
         판정 API가 배포 전이거나 꺼져 있음. 경로가 등록되지 않은 일반 `404`라 본문에 `data.outcome`이 없고 `code`도 고정하지 않는다.
@@ -505,7 +542,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/RouteNotFoundEnvelope'
+            $ref: '#/components/schemas/PlainErrorEnvelope'
           examples:
             disabled:
               value:
@@ -1023,8 +1060,8 @@ components:
             data:
               $ref: '#/components/schemas/ControlPlaneError'
 
-    RouteNotFoundEnvelope:
-      description: 등록되지 않은 경로의 일반 `404`. `data`가 없다.
+    PlainErrorEnvelope:
+      description: 필터·프레임워크가 만드는 일반 오류(경로 미등록 `404`, 본문 크기 초과 `413`). `data`가 없고 `data.outcome`도 없다.
       allOf:
         - $ref: '#/components/schemas/ApiEnvelope'
         - properties:

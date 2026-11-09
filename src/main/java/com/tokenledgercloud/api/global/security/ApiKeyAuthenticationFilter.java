@@ -32,7 +32,7 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
         // These endpoints authenticate project_api_keys in their own services.
         // The member api_keys namespace must not intercept their X-API-Key header.
         // Paths are compared the way Spring MVC routes them, so /api/v2/observe/%65vents is skipped too.
-        return IngestionPaths.isIngestionPost(request);
+        return IngestionPaths.isProjectKeyPost(request);
     }
 
     @Override
