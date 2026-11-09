@@ -1,6 +1,7 @@
 package com.tokenledgercloud.api.domain.decision;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -8,7 +9,6 @@ import java.util.List;
 import java.util.Objects;
 
 import com.tokenledgercloud.api.domain.accounting.ServerPriceCalculator;
-import com.tokenledgercloud.api.domain.accounting.UsageTokens;
 import com.tokenledgercloud.api.domain.policy.PolicyRules;
 
 /**
@@ -103,11 +103,12 @@ public final class AdvisoryEvaluator {
 	 * @param requiredCostUsd            이번 요청의 최대 예상 비용(보수적 상한). 가격을 알 수 없으면 null
 	 * @param remainingMonthlyBudgetUsd  평가된 범위 중 가장 작은 월 한도 잔액. 평가된 범위가 없으면 null
 	 * @param scopes                     실제로 평가한 활성 범위(프로젝트, 환경 순)
-	 * @param retryAfter                 월 한도 때문에 거부 권고일 때, 한도가 초기화되어 다시 시도해 볼 수 있는 시각(다음 UTC 월 1일 00:00).
-	 *                                   이번 요청 비용만으로 한도를 넘거나 요청당 한도 때문이면 기다려도 달라지지 않으므로 null
+	 * @param retryAt                    거부 사유가 전부 시간이 지나면 풀리는 월 한도일 때, 다시 시도해 볼 수 있는 시각(다음 UTC 월 1일 00:00).
+	 *                                   하나라도 기다려도 풀리지 않는 사유(요청당 비용 한도, 이번 요청 비용만으로 월 한도 초과)가 있으면 null.
+	 *                                   SDK의 Decision.retryAfter(429/503 대기 시간, 초)와 다른 값이라 이름을 달리한다
 	 */
 	public record Evaluation(DecisionOutcome outcome, List<Reason> reasons, BigDecimal requiredCostUsd,
-							 BigDecimal remainingMonthlyBudgetUsd, List<ScopeResult> scopes, Instant retryAfter,
+							 BigDecimal remainingMonthlyBudgetUsd, List<ScopeResult> scopes, Instant retryAt,
 							 String algorithmVersion) {
 	}
 
@@ -160,10 +161,10 @@ public final class AdvisoryEvaluator {
 			String label = scope.scope().name().toLowerCase();
 
 			if (rules.requestHardLimitUsd() != null && cost.compareTo(rules.requestHardLimitUsd()) > 0) {
-				denials.add(new Reason("REQUEST_LIMIT_EXCEEDED",
+				denials.add(new Reason("REQUEST_COST_LIMIT_EXCEEDED",
 					"Maximum request cost exceeds the " + label + " per-request hard limit."));
 			} else if (rules.requestSoftLimitUsd() != null && cost.compareTo(rules.requestSoftLimitUsd()) > 0) {
-				warnings.add(new Reason("REQUEST_SOFT_LIMIT_EXCEEDED",
+				warnings.add(new Reason("REQUEST_COST_SOFT_LIMIT_EXCEEDED",
 					"Maximum request cost exceeds the " + label + " per-request soft limit."));
 			}
 
@@ -189,7 +190,7 @@ public final class AdvisoryEvaluator {
 
 		if (!denials.isEmpty()) {
 			Instant retry = monthlyDenied && !costAloneExceedsMonthly && denials.stream()
-				.noneMatch(r -> r.code().equals("REQUEST_LIMIT_EXCEEDED")) ? nextMonthStart(input.now()) : null;
+				.noneMatch(r -> r.code().equals("REQUEST_COST_LIMIT_EXCEEDED")) ? nextMonthStart(input.now()) : null;
 			return new Evaluation(DecisionOutcome.DENY_BUDGET, List.copyOf(denials), cost, remaining,
 				List.copyOf(results), retry, ALGORITHM_VERSION);
 		}
@@ -198,23 +199,35 @@ public final class AdvisoryEvaluator {
 	}
 
 	/**
-	 * 보수적 상한: 입력은 prompt·cachedPrompt 중 비싼 요율, 출력은 completion·reasoning 중 비싼 요율로 모두 계산한다.
-	 * 캐시·추론 세부는 모르는 값이므로 0으로 두고, 같은 요율의 두 버킷으로 계산기를 재사용한다.
+	 * 보수적 상한: 입력 토큰 전부를 prompt·cachedPrompt 중 비싼 요율로, 출력 토큰 전부를 completion·reasoning 중 비싼 요율로 계산한다.
+	 * cachedPrompt는 prompt의, reasoning은 completion의 일부이므로 이 값이 실제 비용의 상한이 된다.
+	 * 별도 요율이 없는(null) 항목은 기본 요율을 쓴다. 합계는 소수 6자리에서 올림(UP)한다.
+	 * (ServerPriceCalculator는 HALF_EVEN이라 경계에서 상한이 내려갈 수 있어 쓰지 않는다)
 	 */
-	private static ServerPriceCalculator.Result upperBoundCost(Input input) {
+	private static Cost upperBoundCost(Input input) {
 		ServerPriceCalculator.Rates r = input.price().rates();
-		BigDecimal promptRate = r.prompt();
-		BigDecimal completionRate = r.completion();
-		if (promptRate != null && r.cachedPrompt() != null) {
-			promptRate = promptRate.max(r.cachedPrompt());
+		long unit = input.price().rateUnitTokens();
+		if (unit <= 0) {
+			return Cost.unpriced("RATE_UNIT_UNCONFIRMED");
 		}
-		if (completionRate != null && r.reasoning() != null) {
-			completionRate = completionRate.max(r.reasoning());
+		if (r.prompt() == null || r.completion() == null || r.prompt().signum() < 0 || r.completion().signum() < 0) {
+			return Cost.unpriced("RATE_MISSING");
 		}
-		var bounded = new ServerPriceCalculator.Rates(promptRate, completionRate, promptRate, completionRate);
-		return ServerPriceCalculator.calculate(
-			new UsageTokens(input.estimatedInputTokens(), input.maxOutputTokens(), 0L, 0L),
-			bounded, input.price().rateUnitTokens());
+		BigDecimal promptRate = r.cachedPrompt() == null ? r.prompt() : r.prompt().max(r.cachedPrompt());
+		BigDecimal completionRate = r.reasoning() == null ? r.completion() : r.completion().max(r.reasoning());
+		BigDecimal total = BigDecimal.valueOf(input.estimatedInputTokens()).multiply(promptRate)
+			.add(BigDecimal.valueOf(input.maxOutputTokens()).multiply(completionRate));
+		return new Cost(total.divide(BigDecimal.valueOf(unit), 6, RoundingMode.UP), null);
+	}
+
+	private record Cost(BigDecimal amount, String reasonCode) {
+		static Cost unpriced(String reasonCode) {
+			return new Cost(null, reasonCode);
+		}
+
+		boolean isPriced() {
+			return amount != null;
+		}
 	}
 
 	private static String priceReasonCode(String detail) {

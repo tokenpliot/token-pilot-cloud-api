@@ -56,7 +56,7 @@ class AdvisoryEvaluatorTest {
 		assertThat(e.reasons()).isEmpty();
 		assertThat(e.requiredCostUsd()).isEqualByComparingTo("0.006");
 		assertThat(e.remainingMonthlyBudgetUsd()).isEqualByComparingTo("7");
-		assertThat(e.retryAfter()).isNull();
+		assertThat(e.retryAt()).isNull();
 		assertThat(e.algorithmVersion()).isEqualTo("advisory-v1");
 	}
 
@@ -73,7 +73,7 @@ class AdvisoryEvaluatorTest {
 		assertThat(e.outcome()).isEqualTo(DecisionOutcome.DENY_BUDGET);
 		assertThat(e.reasons()).extracting(AdvisoryEvaluator.Reason::code).containsExactly("MONTHLY_BUDGET_EXCEEDED");
 		assertThat(e.remainingMonthlyBudgetUsd()).isEqualByComparingTo("0.005");
-		assertThat(e.retryAfter()).isEqualTo(Instant.parse("2026-12-01T00:00:00Z"));
+		assertThat(e.retryAt()).isEqualTo(Instant.parse("2026-12-01T00:00:00Z"));
 	}
 
 	@Test
@@ -84,10 +84,10 @@ class AdvisoryEvaluatorTest {
 	}
 
 	@Test
-	void retryAfterRollsOverTheYear() {
+	void retryAtRollsOverTheYear() {
 		Input in = new Input(1000, 500, PRICE, List.of(project(rules(null, "10", null, null, true), "10")),
 			Instant.parse("2026-12-31T23:59:59Z"));
-		assertThat(AdvisoryEvaluator.evaluate(in).retryAfter()).isEqualTo(Instant.parse("2027-01-01T00:00:00Z"));
+		assertThat(AdvisoryEvaluator.evaluate(in).retryAt()).isEqualTo(Instant.parse("2027-01-01T00:00:00Z"));
 	}
 
 	@Test
@@ -95,8 +95,8 @@ class AdvisoryEvaluatorTest {
 		Evaluation e = AdvisoryEvaluator.evaluate(input(PRICE, project(rules(null, "100", null, "0.005", true), "0")));
 
 		assertThat(e.outcome()).isEqualTo(DecisionOutcome.DENY_BUDGET);
-		assertThat(e.reasons()).extracting(AdvisoryEvaluator.Reason::code).containsExactly("REQUEST_LIMIT_EXCEEDED");
-		assertThat(e.retryAfter()).isNull();
+		assertThat(e.reasons()).extracting(AdvisoryEvaluator.Reason::code).containsExactly("REQUEST_COST_LIMIT_EXCEEDED");
+		assertThat(e.retryAt()).isNull();
 	}
 
 	@Test
@@ -104,7 +104,7 @@ class AdvisoryEvaluatorTest {
 		Evaluation e = AdvisoryEvaluator.evaluate(input(PRICE, project(rules(null, "0.005", null, null, true), "0")));
 
 		assertThat(e.outcome()).isEqualTo(DecisionOutcome.DENY_BUDGET);
-		assertThat(e.retryAfter()).isNull();
+		assertThat(e.retryAt()).isNull();
 	}
 
 	@Test
@@ -113,7 +113,7 @@ class AdvisoryEvaluatorTest {
 
 		assertThat(e.outcome()).isEqualTo(DecisionOutcome.ALLOW);
 		assertThat(e.reasons()).extracting(AdvisoryEvaluator.Reason::code)
-			.containsExactly("REQUEST_SOFT_LIMIT_EXCEEDED", "MONTHLY_SOFT_LIMIT_EXCEEDED");
+			.containsExactly("REQUEST_COST_SOFT_LIMIT_EXCEEDED", "MONTHLY_SOFT_LIMIT_EXCEEDED");
 	}
 
 	@Test
@@ -198,6 +198,68 @@ class AdvisoryEvaluatorTest {
 		Evaluation e = AdvisoryEvaluator.evaluate(input(cheapCache, project(rules(null, "10", null, null, true), "0")));
 
 		assertThat(e.requiredCostUsd()).isEqualByComparingTo("0.006");
+	}
+
+	@Test
+	void anyUnresolvableDenialReasonClearsRetryAt() {
+		// 프로젝트는 월 한도(기다리면 풀림), 환경은 요청당 비용 한도(안 풀림) -> null
+		Evaluation e = AdvisoryEvaluator.evaluate(input(PRICE,
+			project(rules(null, "10", null, null, true), "9.999"),
+			env(rules(null, "100", null, "0.001", true), "0")));
+		assertThat(e.reasons()).extracting(AdvisoryEvaluator.Reason::code)
+			.containsExactly("MONTHLY_BUDGET_EXCEEDED", "REQUEST_COST_LIMIT_EXCEEDED");
+		assertThat(e.retryAt()).isNull();
+
+		// 프로젝트는 월 한도(풀림), 환경은 이번 요청 비용만으로 월 한도 초과(안 풀림) -> null
+		Evaluation f = AdvisoryEvaluator.evaluate(input(PRICE,
+			project(rules(null, "10", null, null, true), "9.999"),
+			env(rules(null, "0.005", null, null, true), "0")));
+		assertThat(f.outcome()).isEqualTo(DecisionOutcome.DENY_BUDGET);
+		assertThat(f.retryAt()).isNull();
+	}
+
+	@Test
+	void costIsRoundedUpNotHalfEven() {
+		// 1 토큰 * 0.5 / 1,000,000 = 0.0000005 -> 올림 0.000001 (HALF_EVEN이면 0.000000)
+		var tiny = PriceInput.available(new ServerPriceCalculator.Rates(usd("0.5"), usd("0.5"), null, null), UNIT);
+		Evaluation e = AdvisoryEvaluator.evaluate(new Input(1, 0, tiny, List.of(project(rules(null, "10", null, null, true), "0")), NOW));
+
+		assertThat(e.requiredCostUsd()).isEqualByComparingTo("0.000001");
+		assertThat(e.requiredCostUsd().scale()).isEqualTo(6);
+	}
+
+	@Test
+	void roundedUpCostCannotSlipPastTheLimitOnTheBoundary() {
+		// 실제 비용 0.0000005는 HALF_EVEN이면 0으로 내려가 한도 0을 통과한다. 올림하면 0.000001 > 0 이라 거부한다.
+		var tiny = PriceInput.available(new ServerPriceCalculator.Rates(usd("0.5"), usd("0.5"), null, null), UNIT);
+		Evaluation e = AdvisoryEvaluator.evaluate(new Input(1, 0, tiny, List.of(project(rules(null, "0", null, null, true), "0")), NOW));
+
+		assertThat(e.outcome()).isEqualTo(DecisionOutcome.DENY_BUDGET);
+	}
+
+	@Test
+	void nullCacheAndReasoningRatesFallBackToBaseRates() {
+		var noExtras = PriceInput.available(new ServerPriceCalculator.Rates(usd("2"), usd("8"), null, null), UNIT);
+		Evaluation e = AdvisoryEvaluator.evaluate(input(noExtras, project(rules(null, "10", null, null, true), "0")));
+
+		assertThat(e.outcome()).isEqualTo(DecisionOutcome.ALLOW);
+		assertThat(e.requiredCostUsd()).isEqualByComparingTo("0.006");
+	}
+
+	@Test
+	void missingBaseRateIsIndeterminate() {
+		var noCompletion = PriceInput.available(new ServerPriceCalculator.Rates(usd("2"), null, null, null), UNIT);
+		Evaluation e = AdvisoryEvaluator.evaluate(input(noCompletion, project(rules(null, "10", null, null, true), "0")));
+
+		assertThat(e.outcome()).isEqualTo(DecisionOutcome.INDETERMINATE);
+		assertThat(e.reasons()).extracting(AdvisoryEvaluator.Reason::code).containsExactly("PRICING_UNAVAILABLE");
+	}
+
+	@Test
+	void softLimitUsesTheSameStrictComparison() {
+		// 누적 + 비용 == soft 한도(3.000) 이면 경고 없음
+		Evaluation e = AdvisoryEvaluator.evaluate(input(PRICE, project(rules("3", "10", null, null, true), "2.994")));
+		assertThat(e.reasons()).isEmpty();
 	}
 
 	@Test
