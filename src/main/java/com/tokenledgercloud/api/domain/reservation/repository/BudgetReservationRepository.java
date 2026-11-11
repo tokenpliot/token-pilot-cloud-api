@@ -1,12 +1,18 @@
 package com.tokenledgercloud.api.domain.reservation.repository;
 
+import java.time.LocalDateTime;
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
+
+import org.springframework.data.domain.Pageable;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import com.tokenledgercloud.api.domain.decision.ReservationState;
 import com.tokenledgercloud.api.domain.reservation.entity.BudgetReservation;
 
 import jakarta.persistence.LockModeType;
@@ -25,4 +31,13 @@ public interface BudgetReservationRepository extends JpaRepository<BudgetReserva
 	@Lock(LockModeType.PESSIMISTIC_WRITE)
 	@Query("select r from BudgetReservation r where r.id = :id")
 	Optional<BudgetReservation> findByIdForUpdate(@Param("id") String id);
+
+	/**
+	 * 만료 시각이 지났는데 아직 결과가 정해지지 않은(RESERVED, IN_FLIGHT) 예약 id. 오래된 것부터 page 크기만큼 돌려준다.
+	 * idx_reservation_expiry (state, expires_at) 인덱스를 탄다.
+	 */
+	@Query("select r.id from BudgetReservation r where r.state in :states and r.expiresAt <= :now"
+			+ " order by r.expiresAt asc, r.id asc")
+	List<String> findExpiredIds(@Param("states") Collection<ReservationState> states,
+			@Param("now") LocalDateTime now, Pageable page);
 }
