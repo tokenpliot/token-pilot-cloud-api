@@ -1,6 +1,7 @@
 package com.tokenledgercloud.api.domain.shadow.service;
 
-import java.math.BigDecimal;
+import java.time.ZoneOffset;
+import com.tokenledgercloud.api.domain.accounting.snapshot.PricingSnapshotRepository;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.util.*;
@@ -9,7 +10,6 @@ import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
-import com.tokenledgercloud.api.domain.accounting.AccountingAmount;
 import com.tokenledgercloud.api.domain.decision.*;
 import com.tokenledgercloud.api.domain.policy.*;
 import com.tokenledgercloud.api.domain.project.repository.ProjectEnvironmentRepository;
@@ -27,9 +27,10 @@ public class ShadowService {
     static final int MAX_MONTH_EVENTS = 2000;
     private final PolicyAccess access;
     private final PolicySnapshotRepository snapshots;
-    private final ShadowPolicyRepository currentPolicies;
+    private final PricingSnapshotRepository prices;
     private final ProjectEnvironmentRepository environments;
-    private final ShadowLedgerRepository ledger;
+    private final ShadowDecisionRepository records;
+    private final DecisionExecutionRepository executions;
     private final ShadowAuditRepository audits;
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -52,57 +53,36 @@ public class ShadowService {
         if (request.candidate() == null) throw invalid("Candidate rules are required.");
         reason(request.reason());
 
-        List<PolicyBinding> beforePolicies = new ArrayList<>(currentPolicies.current(org, project).stream()
-            .filter(s -> !s.getPolicyId().equals(baseline.getPolicyId())).map(ShadowService::binding).toList());
-        beforePolicies.add(binding(baseline));
-        beforePolicies.sort(Comparator.comparing(p -> Objects.requireNonNullElse(p.environment(), "")));
         String runId = UUID.randomUUID().toString();
         PolicyBinding candidate = new PolicyBinding(baseline.getPolicyId(), null, "shadow:" + runId,
             baseline.getEnvironment(), request.candidate());
-        List<PolicyBinding> afterPolicies = beforePolicies.stream()
-            .map(p -> p.policyId().equals(candidate.policyId()) ? candidate : p).toList();
-
-        var rows = ledger.month(org, project, month.atDay(1).atStartOfDay(),
+        var rows = records.samples(org, project, baseline.getId(), month.atDay(1).atStartOfDay(),
             month.plusMonths(1).atDay(1).atStartOfDay(), PageRequest.of(0, MAX_MONTH_EVENTS + 1));
-        if (rows.size() > MAX_MONTH_EVENTS) throw invalid("Pilot replay supports at most 2000 project events per month; no partial sample was saved.");
-        BigDecimal projectSpend = BigDecimal.ZERO;
-        Map<String, BigDecimal> environmentSpend = new HashMap<>();
-        Set<String> incompleteEnvironments = new HashSet<>();
-        boolean projectComplete = true;
+        if (rows.size() > MAX_MONTH_EVENTS) throw invalid("Pilot replay supports at most 2000 matching decisions per month; no partial sample was saved.");
         List<Decision> decisions = new ArrayList<>();
         for (var row : rows) {
-            var u = row.getUsage();
-            var v = row.getAccounting();
-            var price = row.getPrice();
-            BigDecimal cost = confirmedCost(row);
-            String costStatus = cost == null ? "ACTUAL_COST_UNAVAILABLE" : "ACTUAL_PRICED";
-            Sample sample = new Sample(u.getId(), u.getRequestId(), u.getEnvironment(), u.getOccurredAt().toString() + "Z",
-                u.getCallStatus(), v == null ? null : v.getId(), v == null ? null : v.getRevision(),
-                v == null ? null : v.getCostSource().name(), v == null ? null : v.getPricingSnapshotId(),
-                price == null ? null : price.getVersion(), price == null ? null : price.getChecksum(), costStatus, cost,
-                projectSpend, environmentSpend.getOrDefault(u.getEnvironment(), BigDecimal.ZERO),
-                projectComplete, !incompleteEnvironments.contains(u.getEnvironment()));
-            if (baseline.getEnvironment() == null || baseline.getEnvironment().equals(u.getEnvironment())) {
-                Evaluation before = ShadowEvaluator.evaluate(sample, applicable(beforePolicies, u.getEnvironment()));
-                Evaluation after = ShadowEvaluator.evaluate(sample, applicable(afterPolicies, u.getEnvironment()));
-                boolean falseCandidate = before.outcome() == DecisionOutcome.ALLOW && after.outcome().isPolicyDenial()
-                    && "SUCCEEDED".equals(u.getCallStatus());
-                decisions.add(new Decision(sample, before, after, before.outcome() != after.outcome(), falseCandidate));
+            var record = row.getDecision();
+            var context = row.getContext();
+            List<PolicyBinding> bound = new ArrayList<>();
+            for (String id : Arrays.asList(context.getProjectPolicySnapshotId(), context.getEnvironmentPolicySnapshotId())) {
+                if (id != null) bound.add(binding(snapshots.findById(id)
+                    .filter(p -> org.equals(p.getOrganizationId()) && project.equals(p.getProjectId()))
+                    .orElseThrow(ShadowService::hidden)));
             }
-            // Fixed observed traffic: a hypothetical denial never removes historical spend from later samples.
-            if (cost == null) {
-                projectComplete = false;
-                incompleteEnvironments.add(u.getEnvironment());
-            } else {
-                projectSpend = projectSpend.add(cost);
-                environmentSpend.merge(u.getEnvironment(), cost, BigDecimal::add);
-            }
+            var price = context.getPricingSnapshotId() == null ? null : prices.findById(context.getPricingSnapshotId()).orElse(null);
+            Sample sample = new Sample(record.decisionId(), context.getRequestId(), context.getEnvironment(),
+                record.getEvaluatedAt().toInstant(ZoneOffset.UTC).toString(), record.getAlgorithmVersion(),
+                context.getPricingSnapshotId(), price == null ? null : price.getVersion(), price == null ? null : price.getChecksum(),
+                record.getEvaluationInputJson(), List.copyOf(bound));
+            var result = AdvisoryReplay.replay(record, price, bound, candidate);
+            decisions.add(new Decision(sample, result.before(), result.after(),
+                result.before().outcome() != result.after().outcome(), false, result.status()));
         }
         StoredRun result = new StoredRun(runId, project, baseline.getEnvironment(), month.toString(),
-            ShadowEvaluator.VERSION, "HISTORICAL_ACTUAL_COST", grant.memberId(), Instant.now().toString(), request.reason(),
-            List.copyOf(beforePolicies), candidate, ShadowEvaluator.summarize(decisions), List.copyOf(decisions));
+            AdvisoryReplay.VERSION, grant.memberId(), Instant.now().toString(), request.reason(),
+            binding(baseline), candidate, List.copyOf(decisions));
         audits.save(ShadowAudit.create(runId, org, project, Kind.RUN, baseline.getEnvironment(), keyHash, fingerprint,
-            null, null, grant.memberId(), ShadowJson.write(result), false, false, false));
+            null, grant.memberId(), ShadowJson.write(result)));
         return report(org, project, result);
     }
 
@@ -127,56 +107,24 @@ public class ShadowService {
         var grant = access.authorize(auth, project, false);
         if (offset < 0 || offset > MAX_MONTH_EVENTS || limit < 1 || limit > 200) throw invalid("Invalid pagination.");
         var run = loadRun(grant.project().getOrganizationId(), project, runId);
-        List<Decision> matches = run.decisions().stream().filter(d -> !changedOnly || d.changed())
+        List<Decision> matches = withExecution(grant.project().getOrganizationId(), project, run).stream().filter(d -> !changedOnly || d.changed())
             .filter(d -> !falseDenialOnly || d.falseDenialCandidate()).toList();
         int end = Math.min(matches.size(), offset + limit);
         return new DecisionPage(runId, matches.size(), end < matches.size() ? end : null,
             matches.subList(Math.min(offset, matches.size()), end));
     }
 
-    @Transactional(isolation = Isolation.READ_COMMITTED)
-    public Feedback feedback(Authentication auth, String project, String runId, String key, FeedbackRequest request) {
-        var grant = access.authorize(auth, project, true);
-        String org = grant.project().getOrganizationId();
-        String keyHash = keyHash(key);
-        String fingerprint = HashingUtil.sha256(ShadowJson.write(List.of(runId, request)));
-        var duplicate = duplicate(org, project, Kind.EXECUTION, keyHash, fingerprint);
-        if (duplicate.isPresent()) return ShadowJson.read(duplicate.get().getPayloadJson(), Feedback.class);
-        var run = loadRun(org, project, runId);
-        Decision decision = run.decisions().stream().filter(d -> d.sample().usageEventId().equals(request.usageEventId()))
-            .findFirst().orElseThrow(ShadowService::hidden);
-        reason(request.reason());
-        if ((request.customerOverride() == CustomerOverride.ALLOW && request.actualExecution() != ActualExecution.PROCEEDED)
-            || (request.customerOverride() == CustomerOverride.BLOCK && request.actualExecution() != ActualExecution.BLOCKED)) {
-            throw invalid("Override and actual execution disagree.");
-        }
-        boolean policyDenial = request.reportedDecision().isPolicyDenial();
-        boolean unavailable = request.reportedDecision() == DecisionOutcome.CONTROL_PLANE_UNAVAILABLE;
-        boolean override = request.customerOverride() != CustomerOverride.NONE;
-        List<String> categories = new ArrayList<>();
-        if (policyDenial) categories.add("POLICY_DENIAL");
-        if (unavailable) categories.add("SERVER_UNAVAILABLE");
-        if (override) categories.add("CUSTOMER_OVERRIDE");
-        if (request.reportedDecision() == DecisionOutcome.INDETERMINATE) categories.add("INDETERMINATE");
-        Feedback result = new Feedback(UUID.randomUUID().toString(), runId, request.usageEventId(),
-            decision.sample().requestId(), decision.sample().environment(), decision.after().outcome(),
-            request.actualExecution(), request.customerOverride(), request.reportedDecision(), request.customerMode(),
-            List.copyOf(categories), "CUSTOMER_REPORTED_BY_MEMBER", grant.memberId(), Instant.now().toString(), request.reason());
-        audits.save(ShadowAudit.create(result.id(), org, project, Kind.EXECUTION, result.environment(), keyHash, fingerprint,
-            runId, null, grant.memberId(), ShadowJson.write(result), policyDenial, unavailable, override));
-        return result;
-    }
-
     @Transactional(readOnly = true)
-    public List<Feedback> feedback(Authentication auth, String project, String runId, String category, int page, int size) {
+    public List<ExecutionView> executions(Authentication auth, String project, String environment, String decisionId,
+        String category, int page, int size) {
         var grant = access.authorize(auth, project, false);
         String org = grant.project().getOrganizationId();
-        loadRun(org, project, runId);
-        if (category != null && !List.of("POLICY_DENIAL", "SERVER_UNAVAILABLE", "CUSTOMER_OVERRIDE").contains(category)) {
+        if (category != null && !List.of("POLICY_DENIAL", "SERVER_UNAVAILABLE", "CUSTOMER_OVERRIDE").contains(category))
             throw invalid("Unknown audit category.");
-        }
-        return audits.feedback(org, project, runId, category, page(page, size)).stream()
-            .map(a -> ShadowJson.read(a.getPayloadJson(), Feedback.class)).toList();
+        String id = decisionId == null ? null : DecisionExecutionService.recordId(decisionId);
+        if (id != null) records.scoped(id, org, project).orElseThrow(ShadowService::hidden);
+        return executions.list(org, project, environment, id, category, page(page, size)).stream()
+            .map(e -> ShadowJson.read(e.getPayloadJson(), ExecutionView.class)).toList();
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -209,7 +157,7 @@ public class ShadowService {
             request.settings(), request.optIn(), request.evidenceRunId(), grant.memberId(), Instant.now().toString(),
             request.reason(), "CUSTOMER_DECLARATION_ONLY");
         audits.save(ShadowAudit.create(result.id(), org, project, Kind.ROLLOUT, request.environment(), keyHash, fingerprint,
-            null, result.revision(), grant.memberId(), ShadowJson.write(result), false, false, false));
+            result.revision(), grant.memberId(), ShadowJson.write(result)));
         return result;
     }
 
@@ -223,17 +171,37 @@ public class ShadowService {
     }
 
     private PilotReport report(String org, String project, StoredRun r) {
-        return new PilotReport(r.id(), r.projectId(), r.environment(), r.month(), r.algorithmVersion(), r.costBasis(),
-            r.createdAt(), r.actorId(), r.reason(), r.baselinePolicies(), r.candidatePolicy(), r.summary(),
-            audits.countFeedback(org, project, r.id(), null), audits.countFeedback(org, project, r.id(), "SERVER_UNAVAILABLE"),
-            audits.countFeedback(org, project, r.id(), "CUSTOMER_OVERRIDE"),
-            r.summary().candidateEvaluated() == 0 ? "INSUFFICIENT_EVIDENCE" : "MANUAL_REVIEW_REQUIRED",
-            List.of("Historical actual costs are not pre-call conservative upper bounds.",
-                "Observed spend stays fixed after hypothetical denials; this is not a savings forecast.",
-                "Missing actual costs make subsequent monthly balances incomplete.",
-                "Successful calls flagged as false-denial candidates require customer review; they are not confirmed false positives.",
-                "Customer feedback counts are append-only event counts, not unique calls.",
-                "No live enforcement or SDK configuration is changed. Advisory runtime integration remains with #15."));
+        var summary = ShadowSummary.summarize(withExecution(org, project, r));
+        var month = YearMonth.parse(r.month());
+        var from = month.atDay(1).atStartOfDay();
+        var to = month.plusMonths(1).atDay(1).atStartOfDay();
+        var ids = recordIds(r);
+        return new PilotReport(r.id(), r.projectId(), r.environment(), r.month(), r.algorithmVersion(), "SAVED_ADVISORY_UPPER_BOUND",
+            r.createdAt(), r.actorId(), r.reason(), r.baselinePolicy(), r.candidatePolicy(), summary,
+            executions.countForReport(org, project, ids, from, to, r.environment(), null),
+            executions.countForReport(org, project, ids, from, to, r.environment(), "SERVER_UNAVAILABLE"),
+            executions.countForReport(org, project, ids, from, to, r.environment(), "CUSTOMER_OVERRIDE"),
+            summary.candidateEvaluated() == 0 ? "INSUFFICIENT_EVIDENCE" : "MANUAL_REVIEW_REQUIRED",
+            List.of("Only saved decisions bound to the selected baseline snapshot are sampled; no full-traffic representativeness is claimed.",
+                "Original balances and price snapshots stay fixed; hypothetical denials do not forecast savings or future traffic.",
+                "Unsupported replay inputs and inactive-to-active changes without captured spend remain INDETERMINATE.",
+                "False-denial candidates require a reported PROCEEDED execution and customer review; they are not confirmed false positives.",
+                "Execution evidence is customer-reported. Counts are append-only events, may grow after the run, and are not unique calls.",
+                "Unbound outage events are grouped by reported UTC month and scope, not attributed to a server decision.",
+                "No live policy, enforcement or SDK configuration is changed; rollout readiness always requires manual review."));
+    }
+
+    private List<Decision> withExecution(String org, String project, StoredRun r) {
+        Set<String> proceeded = executions.proceeded(org, project, recordIds(r));
+        return r.decisions().stream().map(d -> new Decision(d.sample(), d.before(), d.after(), d.changed(),
+            d.before().outcome() == DecisionOutcome.ALLOW && d.after().outcome().isPolicyDenial()
+                && proceeded.contains(DecisionExecutionService.recordId(d.sample().decisionId())), d.replayStatus())).toList();
+    }
+
+    private static List<String> recordIds(StoredRun r) {
+        // Avoid an empty SQL IN clause on both H2 and MySQL.
+        return r.decisions().isEmpty() ? List.of("00000000-0000-0000-0000-000000000000") : r.decisions().stream()
+            .map(d -> DecisionExecutionService.recordId(d.sample().decisionId())).toList();
     }
 
     private StoredRun loadRun(String org, String project, String id) {
@@ -250,7 +218,7 @@ public class ShadowService {
         return existing;
     }
 
-    private static String keyHash(String key) {
+    static String keyHash(String key) {
         if (key == null || key.length() < 8 || key.length() > 128 || !key.equals(key.strip()) || key.chars().anyMatch(Character::isISOControl)) {
             throw invalid("Idempotency-Key must be an opaque 8-128 character string.");
         }
@@ -272,22 +240,6 @@ public class ShadowService {
     }
     private static PolicyBinding binding(PolicySnapshot p) {
         return new PolicyBinding(p.getPolicyId(), p.getId(), p.getVersion(), p.getEnvironment(), p.rules());
-    }
-    private static List<PolicyBinding> applicable(List<PolicyBinding> all, String environment) {
-        return all.stream().filter(p -> p.environment() == null || p.environment().equals(environment)).toList();
-    }
-    private static BigDecimal confirmedCost(ShadowLedgerRepository.Row row) {
-        var u = row.getUsage();
-        var v = row.getAccounting();
-        if (!"VERIFIED".equals(u.getAccountingStatus()) || v == null
-            || v.getPricingStatus() != AccountingAmount.PricingStatus.PRICED || !"USD".equals(v.getCurrency())
-            || v.getAmount() == null || v.getAmount().signum() < 0) return null;
-        if (v.getCostSource() == AccountingAmount.Source.SERVER_CATALOG) {
-            var p = row.getPrice();
-            if (p == null || !u.getProvider().equals(p.getProvider()) || !u.getModel().equals(p.getModel())
-                || !"USD".equals(p.getCurrency())) return null;
-        }
-        return v.getAmount();
     }
     private static ApiException hidden() { return new ApiException(ErrorCode.NOT_FOUND); }
     private static ApiException invalid(String message) { return new ApiException(ErrorCode.INVALID_INPUT, message); }

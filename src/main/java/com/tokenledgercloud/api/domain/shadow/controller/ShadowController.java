@@ -15,6 +15,7 @@ import com.tokenledgercloud.api.global.response.ApiResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(name = "token-pilot.shadow.enabled", havingValue = "true")
 @RestController
 @RequestMapping("/api/shadow/projects/{projectId}")
 @RequiredArgsConstructor
@@ -45,17 +46,12 @@ public class ShadowController {
         return ApiResponse.success(shadow.decisions(auth, projectId, runId, offset, limit, changedOnly, falseDenialOnly));
     }
 
-    @PostMapping("/runs/{runId}/execution-events")
-    public ApiResponse<Feedback> feedback(Authentication auth, @PathVariable String projectId, @PathVariable String runId,
-        @RequestHeader("Idempotency-Key") String key, @Valid @RequestBody FeedbackRequest request) {
-        return ApiResponse.success(shadow.feedback(auth, projectId, runId, key, request));
-    }
-
-    @GetMapping("/runs/{runId}/execution-events")
-    public ApiResponse<List<Feedback>> feedback(Authentication auth, @PathVariable String projectId, @PathVariable String runId,
+    @GetMapping("/execution-events")
+    public ApiResponse<List<ExecutionView>> executions(Authentication auth, @PathVariable String projectId,
+        @RequestParam(required = false) String environment, @RequestParam(required = false) String decisionId,
         @RequestParam(required = false) String category,
         @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
-        return ApiResponse.success(shadow.feedback(auth, projectId, runId, category, page, size));
+        return ApiResponse.success(shadow.executions(auth, projectId, environment, decisionId, category, page, size));
     }
 
     @PostMapping("/rollout-events")

@@ -53,6 +53,7 @@ public class SecurityConfig {
 				.requestMatchers(HttpMethod.POST, "/api/v2/observe/events").permitAll()
 				// [이슈 #15] 판정 API도 프로젝트 API 키로 서비스에서 인증한다.
 				.requestMatchers(HttpMethod.POST, "/api/control/v1/decisions").permitAll()
+				.requestMatchers(HttpMethod.POST, "/api/control/v1/execution-events").permitAll()
 				.requestMatchers("/api/dashboard/**").permitAll()
 				.requestMatchers("/dashboard").permitAll()
 				.requestMatchers("/login", "/oauth2/**", "/error").permitAll()

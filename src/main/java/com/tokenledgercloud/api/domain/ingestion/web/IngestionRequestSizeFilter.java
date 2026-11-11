@@ -72,7 +72,7 @@ public class IngestionRequestSizeFilter extends OncePerRequestFilter {
 		String path = IngestionPaths.normalizedPath(request);
 		// The decision request is a single small JSON object, so it shares the single-event limit.
 		if (IngestionPaths.EVENT_PATH.equals(path) || IngestionPaths.OBSERVE_EVENT_PATH.equals(path)
-			|| IngestionPaths.DECISION_PATH.equals(path)) {
+			|| IngestionPaths.DECISION_PATH.equals(path) || IngestionPaths.EXECUTION_EVENT_PATH.equals(path)) {
 			return properties.maxEventBytes();
 		}
 		if (IngestionPaths.BATCH_PATH.equals(path)) {
