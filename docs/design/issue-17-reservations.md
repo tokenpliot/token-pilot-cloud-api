@@ -7,7 +7,8 @@ ENFORCE + ALLOW 판정이 잡아두는 예산 예약과 그 정산을 MySQL에 �
 | 1 | V10 마이그레이션, 엔티티, 상태 머신, 원자적 예약·정산 서비스, 동시성 테스트 | 이 PR |
 | 2 | 정산 API `POST /api/control/v1/reservations/{id}/settlements` | 후속 |
 | 3a | 만료 예약 회수 서비스(`ReservationExpiryService`) | 이 PR |
-| 3b | 회수 주기 실행·운영 API, 재시작 복구, 수동 정산(WRITE_OFF) API | 후속 |
+| 3b | 회수 주기 실행(`ReservationExpiryJob`)과 재시작 복구 | 이 PR |
+| 3c | 운영 API: 미정산 예약 조회, 수동 정산(COMMIT·WRITE_OFF), 회수 수동 실행 | 후속 |
 | - | 판정 API(#15)에서 `PolicyContextService.capture` 다음에 `ReservationService.reserve` 호출 | #15 |
 
 ## 계약(control-plane-v1.yaml, #32)과 맞춘 부분
@@ -58,6 +59,12 @@ ADR 0001 §6을 그대로 따른다(`ReservationState`). 정산 종류(`Settleme
 - RESERVED의 기본값이 ADR(RELEASED)과 다른 이유: 계약에 호출 시작을 알리는 API가 없어서 RESERVED여도 실제로 호출됐을 수 있다. 0원으로 풀면 늦게 온 사용량을 받을 수 없다(종료 상태라 409). 아래 "정해야 할 것" 참고.
 - 회수 정산의 키는 `exp:<reservationId>`, 사건 시각은 `expires_at`이다. 여러 서버가 같은 예약을 동시에 회수해도 본문이 같아 한 번만 적용되고 나머지는 재전송으로 끝난다.
 - 그 사이 클라이언트 정산이 먼저 오면(종료 상태) 건너뛰고, 회수 뒤에 늦게 온 COMMIT은 RECONCILIATION_REQUIRED → COMMITTED로 정상 정산된다.
+
+### 주기 실행과 재시작 복구
+
+- `token-pilot.reservation.expiry.enabled=true`일 때만 켜진다(기본 꺼짐). `interval`(기본 1분)마다 `batch-size`(100)씩 최대 `max-batches`(10)번 회수하고, 남은 것은 다음 주기에 처리한다.
+- **재시작 복구**: 예약·정산 상태는 모두 DB에 있어 메모리에서 복구할 것이 없다. 서버가 꺼져 있던 동안 만료된 예약만 남으므로, 기동 직후(`ApplicationReadyEvent`) 한 번 회수한다.
+- `ReservationRestartRecoveryTest`가 같은 DB로 두 번째 애플리케이션을 띄워 이를 확인한다. 버려진 예약은 RECONCILIATION_REQUIRED로 닫히고 금액은 부채로 남으며, 재시작 뒤 늦게 온 COMMIT도 정산된다.
 
 ## 동시성
 
