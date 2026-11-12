@@ -89,8 +89,14 @@ public class ReservationService {
 	/**
 	 * 예약을 정산하거나 해제한다. 같은 Idempotency-Key·같은 본문의 재전송은 처음 결과를 돌려주고(duplicate),
 	 * 같은 키에 다른 본문은 409 IDEMPOTENCY_CONFLICT, 종료 상태에 다른 정산은 409 CONFLICT다.
+	 * {@code exp:}로 시작하는 키는 만료 회수 전용이라 400이다. 클라이언트가 다른 예약의 회수 키를 먼저 차지하면
+	 * 그 예약은 회수 기록을 남길 수 없어 영영 닫히지 않는다.
 	 */
 	public SettlementResult settle(SettlementCommand command) {
+		if (command.idempotencyKey().startsWith(ReservationExpiryService.KEY_PREFIX)) {
+			throw new ApiException(ErrorCode.INVALID_INPUT,
+					"Idempotency-Key prefix " + ReservationExpiryService.KEY_PREFIX + " is reserved for server expiry");
+		}
 		try {
 			return reservationTx.settle(command);
 		} catch (DataIntegrityViolationException exception) {

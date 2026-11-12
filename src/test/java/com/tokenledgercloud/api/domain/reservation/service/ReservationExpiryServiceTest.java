@@ -7,7 +7,9 @@ import static com.tokenledgercloud.api.domain.reservation.service.ReservationSer
 import static com.tokenledgercloud.api.domain.reservation.service.ReservationServiceTest.reserve;
 import static com.tokenledgercloud.api.domain.reservation.service.ReservationServiceTest.settle;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 
 import org.junit.jupiter.api.AfterEach;
@@ -18,6 +20,9 @@ import org.springframework.boot.test.context.SpringBootTest;
 import com.tokenledgercloud.api.domain.decision.ReservationState;
 import com.tokenledgercloud.api.domain.reservation.ExpiryResult;
 import com.tokenledgercloud.api.domain.reservation.SettlementAction;
+import com.tokenledgercloud.api.domain.reservation.SettlementCommand;
+import com.tokenledgercloud.api.global.exception.ApiException;
+import com.tokenledgercloud.api.global.exception.ErrorCode;
 import com.tokenledgercloud.api.domain.reservation.entity.BudgetReservationCounter;
 import com.tokenledgercloud.api.domain.reservation.repository.BudgetReservationCounterRepository;
 import com.tokenledgercloud.api.domain.reservation.repository.BudgetReservationRepository;
@@ -91,6 +96,33 @@ class ReservationExpiryServiceTest {
 		assertThat(result.released()).isEqualTo(1);
 		assertThat(stateOf(id)).isEqualTo(ReservationState.RELEASED);
 		assertThat(counter().getHeldUsd()).isEqualByComparingTo("0");
+	}
+
+	@Test
+	void inFlightReservationIsNeverReleasedEvenWhenReservedOnesAre() {
+		String id = service.reserve(reserve("req-1", "0.40", "1")).reservation().getId();
+		service.markInFlight(id, PROJECT);
+
+		// RELEASE 설정이어도 호출이 시작된 예약의 예산은 돌려주지 않는다. (잠근 뒤의 상태로 결정)
+		ExpiryResult result = expiry.expire(AFTER, 100, SettlementAction.RELEASE);
+
+		assertThat(result.released()).isZero();
+		assertThat(stateOf(id)).isEqualTo(ReservationState.RECONCILIATION_REQUIRED);
+		assertThat(counter().getHeldUsd()).isEqualByComparingTo("0.40");
+	}
+
+	@Test
+	void clientCannotTakeAnotherReservationsExpiryKey() {
+		String first = service.reserve(reserve("req-1", "0.10", "1")).reservation().getId();
+		String second = service.reserve(reserve("req-2", "0.10", "1")).reservation().getId();
+		SettlementCommand stolen = new SettlementCommand(first, PROJECT, ReservationExpiryService.KEY_PREFIX + second,
+				"req-1", SettlementAction.RELEASE, null, null, Instant.parse("2026-11-10T12:00:00Z"));
+
+		assertThatThrownBy(() -> service.settle(stolen))
+				.isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT));
+		// 회수 키가 비어 있으니 두 예약 모두 회수된다.
+		assertThat(expiry.expire(AFTER, 100).reconciliationRequired()).isEqualTo(2);
+		assertThat(stateOf(second)).isEqualTo(ReservationState.RECONCILIATION_REQUIRED);
 	}
 
 	@Test

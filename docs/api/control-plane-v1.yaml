@@ -444,7 +444,8 @@ components:
       description: |
         같은 키와 같은 본문은 같은 결과를, 같은 키와 다른 본문은 `409`를 반환한다.
         키 고유 범위는 (API Key의 프로젝트, 엔드포인트)다. 다른 프로젝트나 다른 엔드포인트의 같은 키는 서로 충돌하지 않는다.
-        서버는 키를 해석하지 않는 불투명 문자열로 다룬다. Java Client SDK는 판정에 `dec:<requestId>`,
+        서버는 키를 해석하지 않는 불투명 문자열로 다룬다. 단, 정산 키 중 `exp:`로 시작하는 값은 서버의 만료 회수 전용이라 `400`이다.
+        Java Client SDK는 판정에 `dec:<requestId>`,
         정산에 `stl:<reservationId>:<COMMIT|RELEASE|RECONCILIATION_REQUIRED>`를 쓰고, 길이가 8~128자를 벗어나면 SHA-256 해시 형태로 바꾼다.
       schema:
         type: string

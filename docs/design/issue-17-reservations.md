@@ -49,7 +49,7 @@ ADR 0001 §6을 그대로 따른다(`ReservationState`). 정산 종류(`Settleme
 
 ## 만료 예약 회수
 
-`ReservationExpiryService.expire(nowUtc, limit)`는 `expires_at`이 지난 RESERVED·IN_FLIGHT 예약을 오래된 순서로 닫는다. 상태 변경은 `ReservationService.settle`을 그대로 써서 잠금·두 카운터·정산 기록 규칙이 클라이언트 정산과 같다.
+`ReservationExpiryService.expire(nowUtc, limit)`는 `expires_at`이 지난 RESERVED·IN_FLIGHT 예약을 오래된 순서로 닫는다. `ReservationTx.expire`가 예약 행을 잠근 뒤의 상태로 회수 결과를 정하고 같은 트랜잭션에서 적용한다. 잠그기 전에 읽은 상태로 정하면 그 사이 IN_FLIGHT가 된 예약을 RELEASE로 풀 수 있기 때문이다. 카운터·정산 기록 규칙은 클라이언트 정산과 같다.
 
 | 만료 시 상태 | 회수 결과 | 카운터 |
 | --- | --- | --- |
@@ -57,8 +57,8 @@ ADR 0001 §6을 그대로 따른다(`ReservationState`). 정산 종류(`Settleme
 | RESERVED | 기본 RECONCILIATION_REQUIRED, 설정 `token-pilot.reservation.expired-reserved-action=RELEASE`면 RELEASED | 기본은 유지, RELEASE면 반환 |
 
 - RESERVED의 기본값이 ADR(RELEASED)과 다른 이유: 계약에 호출 시작을 알리는 API가 없어서 RESERVED여도 실제로 호출됐을 수 있다. 0원으로 풀면 늦게 온 사용량을 받을 수 없다(종료 상태라 409). 아래 "정해야 할 것" 참고.
-- 회수 정산의 키는 `exp:<reservationId>`, 사건 시각은 `expires_at`이다. 여러 서버가 같은 예약을 동시에 회수해도 본문이 같아 한 번만 적용되고 나머지는 재전송으로 끝난다.
-- 그 사이 클라이언트 정산이 먼저 오면(종료 상태) 건너뛰고, 회수 뒤에 늦게 온 COMMIT은 RECONCILIATION_REQUIRED → COMMITTED로 정상 정산된다.
+- 회수 정산의 키는 `exp:<reservationId>`, 사건 시각은 `expires_at`이다. `exp:` 접두사는 서버 전용이라 클라이언트 정산에서는 `400`이다. 클라이언트가 다른 예약의 회수 키를 먼저 차지하면 그 예약은 회수 기록을 남길 수 없어 영영 닫히지 않기 때문이다.
+- 여러 서버가 같은 예약을 동시에 회수하거나 클라이언트 정산이 먼저 오면, 늦은 쪽은 잠금 뒤 이미 닫힌 상태를 보고 건너뛴다. 회수 뒤에 늦게 온 COMMIT은 RECONCILIATION_REQUIRED → COMMITTED로 정상 정산된다.
 
 ### 주기 실행과 재시작 복구
 

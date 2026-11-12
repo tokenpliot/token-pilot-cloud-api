@@ -1,6 +1,7 @@
 package com.tokenledgercloud.api.domain.reservation.service;
 
 import java.math.BigDecimal;
+import java.time.ZoneOffset;
 import java.util.Optional;
 
 import org.springframework.stereotype.Component;
@@ -111,7 +112,38 @@ public class ReservationTx {
 		if (!reservation.getRequestId().equals(command.requestId())) {
 			throw new ApiException(ErrorCode.INVALID_INPUT, "requestId does not match the reservation");
 		}
+		return apply(reservation, command);
+	}
 
+	/**
+	 * 만료 예약 하나를 닫는다. 예약 행을 잠근 뒤의 상태로 정산 종류를 정한다. 잠그기 전에 읽은 상태로 정하면
+	 * 그 사이 IN_FLIGHT가 된 예약을 RELEASE로 풀어, 실행 중인 호출의 예산을 돌려줄 수 있다.
+	 * IN_FLIGHT는 항상 RECONCILIATION_REQUIRED(부채 유지), RESERVED는 actionForReserved다.
+	 *
+	 * @return 이미 닫혀 있으면(클라이언트 정산이나 다른 서버의 회수가 먼저 커밋) 비어 있다.
+	 */
+	@Transactional(isolation = Isolation.READ_COMMITTED)
+	public Optional<SettlementResult> expire(String reservationId, SettlementAction actionForReserved) {
+		Optional<BudgetReservation> locked = reservationRepository.findByIdForUpdate(reservationId);
+		if (locked.isEmpty()) {
+			return Optional.empty();
+		}
+		BudgetReservation reservation = locked.get();
+		ReservationState state = reservation.getState();
+		if (state != ReservationState.RESERVED && state != ReservationState.IN_FLIGHT) {
+			return Optional.empty();
+		}
+		SettlementAction action = state == ReservationState.IN_FLIGHT
+				? SettlementAction.RECONCILIATION_REQUIRED
+				: actionForReserved;
+		SettlementCommand command = new SettlementCommand(reservation.getId(), reservation.getProjectId(),
+				ReservationExpiryService.KEY_PREFIX + reservation.getId(), reservation.getRequestId(), action, null, null,
+				reservation.getExpiresAt().toInstant(ZoneOffset.UTC));
+		return Optional.of(apply(reservation, command));
+	}
+
+	// 잠근 예약에 정산 한 건을 적용한다. 상태 전이 검사, 두 카운터, 예약 상태, 정산 기록을 함께 바꾼다.
+	private SettlementResult apply(BudgetReservation reservation, SettlementCommand command) {
 		// 2. 상태 전이가 규칙에 맞는지 본다. RESERVED에서 바로 온 COMMIT/RECONCILIATION_REQUIRED는
 		//    호출이 이미 일어난 것이므로 IN_FLIGHT를 거친 것으로 본다.
 		ReservationState from = reservation.getState();
