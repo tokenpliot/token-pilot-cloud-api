@@ -18,6 +18,7 @@ public final class IngestionPaths {
 	public static final String OBSERVE_EVENT_PATH = "/api/v2/observe/events";
 	/** Control-plane decision endpoint. It also authenticates with a project API key, but is not an ingestion endpoint. */
 	public static final String DECISION_PATH = "/api/control/v1/decisions";
+	public static final String EXECUTION_EVENT_PATH = "/api/control/v1/execution-events";
 
 	private static final UrlPathHelper URL_PATH_HELPER = UrlPathHelper.defaultInstance;
 
@@ -54,6 +55,7 @@ public final class IngestionPaths {
 		if (isIngestionPost(request)) {
 			return true;
 		}
-		return "POST".equals(request.getMethod()) && DECISION_PATH.equals(normalizedPath(request));
+		String path = normalizedPath(request);
+		return "POST".equals(request.getMethod()) && (DECISION_PATH.equals(path) || EXECUTION_EVENT_PATH.equals(path));
 	}
 }

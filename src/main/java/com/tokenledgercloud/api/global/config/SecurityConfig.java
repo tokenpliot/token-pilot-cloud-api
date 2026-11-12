@@ -53,6 +53,7 @@ public class SecurityConfig {
 				.requestMatchers(HttpMethod.POST, "/api/v2/observe/events").permitAll()
 				// [이슈 #15] 판정 API도 프로젝트 API 키로 서비스에서 인증한다.
 				.requestMatchers(HttpMethod.POST, "/api/control/v1/decisions").permitAll()
+				.requestMatchers(HttpMethod.POST, "/api/control/v1/execution-events").permitAll()
 				.requestMatchers("/api/dashboard/**").permitAll()
 				.requestMatchers("/dashboard").permitAll()
 				.requestMatchers("/login", "/oauth2/**", "/error").permitAll()
@@ -60,6 +61,7 @@ public class SecurityConfig {
 				// [이슈 #11] Observe 원장 조회 API는 로그인한 사용자만 호출할 수 있다. (아래 개발용 전체 허용보다 먼저 와야 한다)
 				.requestMatchers("/api/observe/**").authenticated()
 				.requestMatchers("/api/policies/**").authenticated()
+				.requestMatchers("/api/shadow/**").authenticated()
 				//.anyRequest().authenticated()
 				.anyRequest().permitAll() //개발용
 
