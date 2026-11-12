@@ -29,7 +29,8 @@ import jakarta.servlet.http.HttpServletResponse;
  *
  * <p>A declared {@code Content-Length} over the limit is refused without reading the body. Otherwise at most
  * limit+1 bytes are read (so chunked requests are bounded too) and handed on unchanged, which keeps memory use
- * within the configured limit. Only the ingestion POST endpoints (v1 single/batch, v2 observe) are affected.
+ * within the configured limit. Only the ingestion POST endpoints (v1 single/batch, v2 observe) and the control-plane
+ * decision endpoint are affected.
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 10)
@@ -69,7 +70,9 @@ public class IngestionRequestSizeFilter extends OncePerRequestFilter {
 	private int limitFor(HttpServletRequest request) {
 		// Compare the normalized path, not the raw URI: /api/ingestion/even%74s must not skip the limit.
 		String path = IngestionPaths.normalizedPath(request);
-		if (IngestionPaths.EVENT_PATH.equals(path) || IngestionPaths.OBSERVE_EVENT_PATH.equals(path)) {
+		// The decision request is a single small JSON object, so it shares the single-event limit.
+		if (IngestionPaths.EVENT_PATH.equals(path) || IngestionPaths.OBSERVE_EVENT_PATH.equals(path)
+			|| IngestionPaths.DECISION_PATH.equals(path)) {
 			return properties.maxEventBytes();
 		}
 		if (IngestionPaths.BATCH_PATH.equals(path)) {
