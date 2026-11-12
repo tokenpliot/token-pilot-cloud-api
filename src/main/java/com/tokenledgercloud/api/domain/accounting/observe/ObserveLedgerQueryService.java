@@ -79,19 +79,20 @@ public class ObserveLedgerQueryService {
 				? null
 				: Math.max(0L, Duration.between(row.getLastReceivedAt(), now).getSeconds());
 		// 발생→수신 지연을 이벤트마다 계산해 최대와 평균을 낸다. 이벤트가 없으면 0초로 위장하지 않고 null이다.
-		long maxDelay = 0L;
-		long totalDelay = 0L;
+		// 밀리초로 합산하고 마지막에만 초 단위로 버린다. 이벤트마다 먼저 버리면 평균이 최대 1초 작게 나온다.
+		long maxDelayMillis = 0L;
+		long totalDelayMillis = 0L;
 		long delayCount = 0L;
 		for (var delayRow : queryRepository.findDelayRows(organizationId, projectId, env, period.from(), period.to())) {
 			LocalDateTime receivedUtc = toUtc(delayRow.getReceivedAt(), receivedZone);
 			// 클라이언트 시계가 빨라서 발생 시각이 수신보다 늦게 찍힌 경우는 지연 0으로 본다.
-			long delay = Math.max(0L, Duration.between(delayRow.getOccurredAt(), receivedUtc).getSeconds());
-			maxDelay = Math.max(maxDelay, delay);
-			totalDelay += delay;
+			long delayMillis = Math.max(0L, Duration.between(delayRow.getOccurredAt(), receivedUtc).toMillis());
+			maxDelayMillis = Math.max(maxDelayMillis, delayMillis);
+			totalDelayMillis += delayMillis;
 			delayCount++;
 		}
-		Long maxDelaySeconds = delayCount == 0 ? null : maxDelay;
-		Long averageDelaySeconds = delayCount == 0 ? null : totalDelay / delayCount;
+		Long maxDelaySeconds = delayCount == 0 ? null : maxDelayMillis / 1000;
+		Long averageDelaySeconds = delayCount == 0 ? null : totalDelayMillis / delayCount / 1000;
 		// 응답의 두 시각은 모두 UTC로 맞춘다. (발생 시각은 원래 UTC다)
 		return new IngestionLagResponse(projectId, env, period.from(), period.to(),
 				eventCount, unsettled, toUtc(row.getLastReceivedAt(), receivedZone), row.getLastOccurredAt(), seconds,

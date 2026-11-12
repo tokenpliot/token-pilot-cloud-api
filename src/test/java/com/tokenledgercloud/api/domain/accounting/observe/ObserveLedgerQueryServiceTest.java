@@ -192,6 +192,19 @@ class ObserveLedgerQueryServiceTest {
 	}
 
 	@Test
+	void averageDelayTruncatesOnlyAfterAveraging() {
+		// 발생 UTC 12:00. 지연은 0.9초와 1.9초: 평균 1.4초는 1초다. (이벤트마다 먼저 버리면 0초)
+		receivedEvent("f1", LocalDateTime.of(2026, 10, 10, 21, 0, 0, 900_000_000));
+		receivedEvent("f2", LocalDateTime.of(2026, 10, 10, 21, 0, 1, 900_000_000));
+
+		var lag = service.getIngestionLag(ORG, projectId, null, PERIOD, LocalDateTime.of(2026, 10, 10, 21, 1),
+				ZoneId.of("Asia/Seoul"));
+
+		assertThat(lag.averageDelaySeconds()).isEqualTo(1L);
+		assertThat(lag.maxDelaySeconds()).isEqualTo(1L);
+	}
+
+	@Test
 	void unattributedCostUsesLatestRevisionOfQuarantinedEventsOnly() {
 		// 격리 이벤트 q1: 개정 1은 3달러, 정정된 개정 2는 4달러.
 		UsageLog q1 = event(projectId, "q1", "QUARANTINED", "UNSETTLED", "openai", "gpt-a", 10);
