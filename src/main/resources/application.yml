@@ -84,3 +84,12 @@ jwt:
 #       rate-unit-tokens: 0         # tokens per pricing_plans rate (e.g. 1000000). 0 = unconfirmed: every event is
 #                                   # recorded UNPRICED. Changing it after events were priced conflicts with stored
 #                                   # snapshots of the same plan version (events become UNPRICED) until the plan version is bumped
+#   reservation:
+#     expired-reserved-action: RECONCILIATION_REQUIRED
+#                                   # expired RESERVED reservations: RECONCILIATION_REQUIRED keeps the reserved amount as
+#                                   # an unsettled liability (default); RELEASE gives it back to the budget (ADR 0001)
+#     expiry:
+#       enabled: false              # true runs the expired-reservation sweep (ReservationExpiryJob)
+#       interval: PT1M              # delay between sweeps (ISO-8601 duration)
+#       batch-size: 100             # reservations closed per batch
+#       max-batches: 10             # batches per sweep; the rest waits for the next sweep
