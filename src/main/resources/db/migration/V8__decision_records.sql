@@ -6,12 +6,6 @@
 alter table policy_request_contexts
     modify column request_id varchar(128) character set utf8mb4 collate utf8mb4_bin not null;
 
--- Body fingerprint of the decision request that first bound this context. A concurrent request with the same requestId
--- but another body (e.g. another model) would otherwise be evaluated against the first request's pricing snapshot
--- before either decision row exists. Null for contexts bound without a decision body.
-alter table policy_request_contexts
-    add column request_fingerprint char(64) null;
-
 -- One row per decision. The key columns use the same char(36) type as projects and policy_request_contexts
 -- (no explicit character set) so the foreign keys below match.
 create table decision_records (

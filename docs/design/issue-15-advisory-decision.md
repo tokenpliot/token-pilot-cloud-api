@@ -37,7 +37,7 @@
 **기존 코드에 닿는 곳** (동작은 바뀌지 않는다)
 - `ProjectApiKeyAuthenticator`: `authenticate(rawApiKey, environment)` 오버로드 추가. 기존 검증은 private 메서드로 뽑아 함께 쓴다.
 - `IngestionPaths`, `ApiKeyAuthenticationFilter`, `IngestionRequestSizeFilter`, `SecurityConfig`: 판정 경로가 수집 경로와 같은 정규화 경로로 필터를 받게 한다.
-- `PolicyRequestContext`, `PolicyContextService`: requestId 길이 100에서 128로. context를 처음 묶은 요청의 본문 지문(`request_fingerprint`, V8)을 함께 저장한다.
+- `PolicyRequestContext`, `PolicyContextService`: requestId 길이 100에서 128로. context를 처음 묶은 요청의 본문 지문(`request_fingerprint`, V11)을 함께 저장한다.
 
 ## 판정 규칙
 
