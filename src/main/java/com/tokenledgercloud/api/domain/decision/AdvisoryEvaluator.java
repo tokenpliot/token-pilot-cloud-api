@@ -133,20 +133,20 @@ public final class AdvisoryEvaluator {
 			.filter(s -> s.rules() != null)
 			.sorted(java.util.Comparator.comparing(ScopeInput::scope))
 			.toList();
+		List<ScopeInput> active = configured.stream().filter(s -> Boolean.TRUE.equals(s.rules().active())).toList();
+		if (!configured.isEmpty() && active.isEmpty()) {
+			// 고객이 정책을 끈 것이다. 판정 근거가 없는 것이 아니라 적용할 규칙이 없는 것이므로 판정 불가로 보지 않는다.
+			// 가격을 몰라도 평가할 규칙이 없으니 결과는 같다. 가격 실패를 먼저 보면 정책을 꺼도 fail-closed 고객이 막힌다.
+			return new Evaluation(DecisionOutcome.ALLOW,
+				List.of(new Reason("POLICY_INACTIVE", "All applicable policies are inactive; no rule was evaluated.")),
+				cost, null, List.of(), null, ALGORITHM_VERSION);
+		}
 		if (configured.isEmpty()) {
 			indeterminate.add(new Reason("POLICY_NOT_CONFIGURED", "No policy is configured for this project or environment."));
 		}
 		if (!indeterminate.isEmpty()) {
 			return new Evaluation(DecisionOutcome.INDETERMINATE, List.copyOf(indeterminate), cost, null,
 				List.of(), null, ALGORITHM_VERSION);
-		}
-
-		List<ScopeInput> active = configured.stream().filter(s -> Boolean.TRUE.equals(s.rules().active())).toList();
-		if (active.isEmpty()) {
-			// 고객이 정책을 끈 것이다. 판정 근거가 없는 것이 아니라 적용할 규칙이 없는 것이므로 판정 불가로 보지 않는다.
-			return new Evaluation(DecisionOutcome.ALLOW,
-				List.of(new Reason("POLICY_INACTIVE", "All applicable policies are inactive; no rule was evaluated.")),
-				cost, null, List.of(), null, ALGORITHM_VERSION);
 		}
 
 		List<Reason> denials = new ArrayList<>();

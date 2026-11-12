@@ -149,6 +149,17 @@ class AdvisoryEvaluatorTest {
 	}
 
 	@Test
+	void allPoliciesInactiveIsAllowEvenWhenPriceIsUnknown() {
+		// 정책을 끈 fail-closed 고객이 가격 미상 때문에 계속 막히면 안 된다.
+		Evaluation e = AdvisoryEvaluator.evaluate(input(PriceInput.unavailable("PRICING_NOT_FOUND"),
+			project(rules(null, "0.001", null, null, false), "5")));
+
+		assertThat(e.outcome()).isEqualTo(DecisionOutcome.ALLOW);
+		assertThat(e.reasons()).extracting(AdvisoryEvaluator.Reason::code).containsExactly("POLICY_INACTIVE");
+		assertThat(e.requiredCostUsd()).isNull();
+	}
+
+	@Test
 	void noPolicyIsIndeterminate() {
 		Evaluation e = AdvisoryEvaluator.evaluate(input(PRICE, project(null, "0"), env(null, "0")));
 
