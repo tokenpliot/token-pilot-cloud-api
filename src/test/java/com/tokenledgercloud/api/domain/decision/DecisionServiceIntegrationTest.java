@@ -26,6 +26,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 import com.tokenledgercloud.api.domain.member.entity.Member;
 import com.tokenledgercloud.api.domain.member.entity.Role;
 import com.tokenledgercloud.api.domain.member.repository.MemberRepository;
+import com.tokenledgercloud.api.domain.ingestion.service.ProjectApiKeyAuthenticator;
+import com.tokenledgercloud.api.domain.policy.PolicyContextService;
 import com.tokenledgercloud.api.domain.policy.PolicyRequests;
 import com.tokenledgercloud.api.domain.policy.PolicyRules;
 import com.tokenledgercloud.api.domain.policy.PolicyService;
@@ -69,6 +71,8 @@ class DecisionServiceIntegrationTest {
 	@Autowired PasswordEncoder passwordEncoder;
 	@Autowired JwtTokenProvider jwt;
 	@Autowired JdbcTemplate jdbc;
+	@Autowired PolicyContextService contexts;
+	@Autowired ProjectApiKeyAuthenticator authenticator;
 	@Autowired PlatformTransactionManager transactions;
 
 	ProjectKeyFixtures fixtures;
@@ -173,6 +177,21 @@ class DecisionServiceIntegrationTest {
 		assertThatThrownBy(() -> service.decide(keyA, "other-key-1", command("req-1", PRICED_MODEL, EnforcementMode.ADVISORY)))
 			.isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.IDEMPOTENCY_CONFLICT));
 		assertThat(records()).isEqualTo(1);
+	}
+
+	@Test
+	void requestIdBoundByAnotherBodyIsConflictBeforeEvaluating() {
+		policy(projectA, null, "100", null);
+		// 다른 모델 요청이 context를 먼저 묶고 아직 판정을 저장하지 않은 순간(동시 요청)을 만든다.
+		DecisionCommand first = command("req-1", "model-without-plan", EnforcementMode.ADVISORY);
+		contexts.capture(authenticator.authenticate(keyA, "prod"), "prod", "req-1", null, DecisionFingerprint.of(first));
+
+		// 이 요청을 묶인 context(다른 모델의 가격)로 평가해 저장하면 안 된다.
+		assertThatThrownBy(() -> service.decide(keyA, "dec:req-1", command("req-1", PRICED_MODEL, EnforcementMode.ADVISORY)))
+			.isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.IDEMPOTENCY_CONFLICT));
+		assertThat(records()).isZero();
+		// 먼저 묶은 요청은 그대로 진행된다.
+		assertThat(service.decide(keyA, "dec:req-1-first", first).outcome()).isEqualTo(DecisionOutcome.INDETERMINATE);
 	}
 
 	@Test

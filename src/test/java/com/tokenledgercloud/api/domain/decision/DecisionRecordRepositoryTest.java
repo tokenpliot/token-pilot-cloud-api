@@ -59,7 +59,7 @@ class DecisionRecordRepositoryTest {
 	}
 
 	private String context(String projectId, String requestId) {
-		return contexts.capture(key(projectId), "prod", requestId, null).context().getId();
+		return contexts.capture(key(projectId), "prod", requestId, null, null).context().getId();
 	}
 
 	private DecisionRecord record(String projectId, String contextId, String idempotencyKey) {
@@ -125,8 +125,8 @@ class DecisionRecordRepositoryTest {
 	void requestIdOf128CharactersIsStoredAndOf129IsRejected() {
 		String max = "r".repeat(128);
 
-		assertThat(contexts.capture(key("project-a"), "prod", max, null).context().getRequestId()).hasSize(128);
-		assertThatThrownBy(() -> contexts.capture(key("project-a"), "prod", "r".repeat(129), null))
+		assertThat(contexts.capture(key("project-a"), "prod", max, null, null).context().getRequestId()).hasSize(128);
+		assertThatThrownBy(() -> contexts.capture(key("project-a"), "prod", "r".repeat(129), null, null))
 			.isInstanceOf(ApiException.class);
 	}
 }

@@ -37,7 +37,7 @@
 **기존 코드에 닿는 곳** (동작은 바뀌지 않는다)
 - `ProjectApiKeyAuthenticator`: `authenticate(rawApiKey, environment)` 오버로드 추가. 기존 검증은 private 메서드로 뽑아 함께 쓴다.
 - `IngestionPaths`, `ApiKeyAuthenticationFilter`, `IngestionRequestSizeFilter`, `SecurityConfig`: 판정 경로가 수집 경로와 같은 정규화 경로로 필터를 받게 한다.
-- `PolicyRequestContext`, `PolicyContextService`: requestId 길이 100에서 128로.
+- `PolicyRequestContext`, `PolicyContextService`: requestId 길이 100에서 128로. context를 처음 묶은 요청의 본문 지문(`request_fingerprint`, V8)을 함께 저장한다.
 
 ## 판정 규칙
 
@@ -49,7 +49,7 @@
 - **재시도 시각**(`retryAt`)은 거부 사유가 전부 시간이 지나면 풀리는 월 한도일 때만 다음 UTC 월 1일 00:00이다. 하나라도 기다려도 풀리지 않는 사유가 있으면 없다. SDK의 `retryAfter`(429/503 대기 시간)와 이름을 분리했다.
 - reason 코드 목록은 yaml의 `DecisionReason` 설명에 있다.
 
-**처리 순서**: 프로젝트 키 인증 → 멱등 키 조회(같은 지문이면 저장한 응답, 다르면 409) → 가격 snapshot 선택과 정책 `capture` → 같은 requestId의 다른 키 검사(409) → 월 지출 조회와 평가 → 저장. 동시에 같은 키가 오면 유니크 위반을 잡아 새 트랜잭션에서 다시 조회한다. 서비스는 트랜잭션 밖에서 실행하며, 바깥 트랜잭션이 있으면 거부한다(`capture`의 프로젝트 행 잠금을 쥔 채 insert하지 않기 위해).
+**처리 순서**: 프로젝트 키 인증 → 멱등 키 조회(같은 지문이면 저장한 응답, 다르면 409) → 가격 snapshot 선택과 정책 `capture` → 같은 requestId의 다른 키 검사(409) → context를 묶은 본문 지문과 비교(다르면 409) → 월 지출 조회와 평가 → 저장. 지문 비교가 없으면 같은 requestId로 모델만 다른 요청이 동시에 올 때, 판정이 저장되기 전 틈에 다른 모델의 가격 snapshot으로 평가된다. 동시에 같은 키가 오면 유니크 위반을 잡아 새 트랜잭션에서 다시 조회한다. 서비스는 트랜잭션 밖에서 실행하며, 바깥 트랜잭션이 있으면 거부한다(`capture`의 프로젝트 행 잠금을 쥔 채 insert하지 않기 위해).
 
 ## 미확정 가정
 

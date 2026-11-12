@@ -119,12 +119,18 @@ public class DecisionService {
 		// 3. 가격 snapshot을 고르고 정책과 함께 이 요청에 묶는다. 같은 requestId의 context가 이미 있으면 그것을 재사용한다.
 		LocalDateTime nowUtc = LocalDateTime.now(clock.withZone(ZoneOffset.UTC));
 		PriceSelection selection = selectPrice(command.provider(), command.model(), nowUtc);
-		ContextView context = contexts.capture(key, command.environment(), command.requestId(), selection.snapshotId());
+		ContextView context = contexts.capture(key, command.environment(), command.requestId(), selection.snapshotId(), fingerprint);
 
 		// J. 같은 requestId에 이미 판정이 있다. 같은 키면 2 이후 동시에 저장된 것이므로 지문으로 판단하고, 다른 키면 409다.
 		Optional<DecisionResponse> existing = existingForRequest(context.context().getId(), idempotencyKey, fingerprint);
 		if (existing.isPresent()) {
 			return existing.get();
+		}
+		// 같은 requestId를 다른 본문(예: 다른 모델)으로 보낸 요청이 먼저 context를 묶었고 아직 판정을 저장하지 않았다.
+		// 그 가격 snapshot은 다른 모델의 것일 수 있으므로 평가하지 않고 409로 끝낸다.
+		String boundFingerprint = context.context().getRequestFingerprint();
+		if (boundFingerprint != null && !boundFingerprint.equals(fingerprint)) {
+			throw new ApiException(ErrorCode.IDEMPOTENCY_CONFLICT, "requestId is already bound to another request body.");
 		}
 
 		// 4. 계산. 가격은 context에 묶인 snapshot을 쓴다(재사용된 context면 지금 고른 가격이 아니다).
