@@ -25,6 +25,12 @@ public interface ObserveLedgerQueryRepository extends Repository<UsageLog, Strin
 		Long getUnsettledCount();           // 아직 정산되지 않은 이벤트 수
 	}
 
+	/** 발생→수신 지연 계산에 필요한 두 시각. occurredAt은 UTC, receivedAt(created_at)은 서버(JVM) 시간대다. */
+	interface DelayRow {
+		LocalDateTime getOccurredAt();  // 호출 발생 시각 (UTC)
+		LocalDateTime getReceivedAt();  // 서버가 받은 시각 (JVM 시간대)
+	}
+
 	/** 정산 확인 분류에 필요한 이벤트 한 줄. */
 	interface ReconciliationRow {
 		String getAccountingStatus();   // 회계 검증 상태
@@ -57,6 +63,25 @@ public interface ObserveLedgerQueryRepository extends Repository<UsageLog, Strin
 		  and u.accountingStatus <> 'LEGACY_UNVERIFIED'
 		""")
 	IngestionRow findIngestionRow(@Param("organizationId") String organizationId,
+			@Param("projectId") String projectId,
+			@Param("environment") String environment,
+			@Param("from") LocalDateTime from,
+			@Param("to") LocalDateTime to);
+
+	// 기간 안의 원장 이벤트마다 발생 시각과 수신 시각을 읽는다. (수집 지연 = 수신 - 발생)
+	// 시간대 변환은 DB마다 문법이 달라서 서비스에서 한다. findIngestionRow와 같은 범위 조건을 쓴다.
+	@Query("""
+		select u.occurredAt as occurredAt,
+			   u.createdAt as receivedAt
+		from UsageLog u
+		where u.organizationId = :organizationId
+		  and u.projectId = :projectId
+		  and (:environment is null or u.environment = :environment)
+		  and u.occurredAt >= :from
+		  and u.occurredAt < :to
+		  and u.accountingStatus <> 'LEGACY_UNVERIFIED'
+		""")
+	List<DelayRow> findDelayRows(@Param("organizationId") String organizationId,
 			@Param("projectId") String projectId,
 			@Param("environment") String environment,
 			@Param("from") LocalDateTime from,

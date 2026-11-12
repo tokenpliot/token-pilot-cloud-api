@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -88,6 +89,28 @@ class ObserveLedgerQueryServiceTest {
 				.build());
 	}
 
+	// 수신 시각(created_at)을 정해서 원장 이벤트를 저장하는 도우미. 수집 지연 계산을 확인할 때 쓴다.
+	private void receivedEvent(String eventId, LocalDateTime receivedAt) {
+		usageLogRepository.saveAndFlush(UsageLog.builder()
+				.organizationId(ORG)
+				.projectId(projectId)
+				.environment("prod")
+				.requestId("req-" + eventId)
+				.eventId(eventId)
+				.provider("openai")
+				.model("gpt-a")
+				.totalTokens(10L)
+				.promptCostUsd(BigDecimal.ZERO)
+				.pricingVersion("ledger")
+				.sourceType("observe")
+				.accountingStatus("PENDING")
+				.callStatus("SUCCEEDED")
+				.settlementState("UNSETTLED")
+				.occurredAt(OCCURRED_AT)
+				.createdAt(receivedAt)
+				.build());
+	}
+
 	// 이벤트에 실제(ACTUAL) 원장 값을 한 개정본 추가하는 도우미.
 	private void actual(UsageLog event, int revision, AccountingAmount amount) {
 		String snapshotId = amount.source() == AccountingAmount.Source.SERVER_CATALOG ? "snap-1" : null;
@@ -133,6 +156,39 @@ class ObserveLedgerQueryServiceTest {
 		assertThat(lag.eventCount()).isZero();
 		assertThat(lag.lastReceivedAt()).isNull();
 		assertThat(lag.secondsSinceLastReceived()).isNull();
+		assertThat(lag.maxDelaySeconds()).isNull();
+		assertThat(lag.averageDelaySeconds()).isNull();
+	}
+
+	@Test
+	void ingestionDelayIsMeasuredFromOccurredToReceivedInUtc() {
+		// 발생은 UTC 12:00. 수신 시각은 서울 시간(UTC+9)으로 저장돼 있다: 21:00:30 = UTC 12:00:30, 21:01:30 = UTC 12:01:30.
+		ZoneId seoul = ZoneId.of("Asia/Seoul");
+		receivedEvent("d1", LocalDateTime.of(2026, 10, 10, 21, 0, 30));
+		receivedEvent("d2", LocalDateTime.of(2026, 10, 10, 21, 1, 30));
+
+		var lag = service.getIngestionLag(ORG, projectId, null, PERIOD, LocalDateTime.of(2026, 10, 10, 21, 2, 30), seoul);
+
+		// 지연은 30초와 90초다. 시간대를 섞으면 9시간(32400초)이 더해진다.
+		assertThat(lag.maxDelaySeconds()).isEqualTo(90L);
+		assertThat(lag.averageDelaySeconds()).isEqualTo(60L);
+		// 응답의 시각은 모두 UTC다.
+		assertThat(lag.lastReceivedAt()).isEqualTo(LocalDateTime.of(2026, 10, 10, 12, 1, 30));
+		assertThat(lag.lastOccurredAt()).isEqualTo(OCCURRED_AT);
+		// 마지막 수신 후 지난 시간은 같은 시간대끼리 뺀다.
+		assertThat(lag.secondsSinceLastReceived()).isEqualTo(60L);
+	}
+
+	@Test
+	void receivedBeforeOccurredCountsAsNoDelay() {
+		// 클라이언트 시계가 빨라 발생 시각이 수신(UTC 11:59)보다 늦게 찍혀도 음수 지연을 만들지 않는다.
+		receivedEvent("early", LocalDateTime.of(2026, 10, 10, 20, 59));
+
+		var lag = service.getIngestionLag(ORG, projectId, null, PERIOD, LocalDateTime.of(2026, 10, 10, 21, 0),
+				ZoneId.of("Asia/Seoul"));
+
+		assertThat(lag.maxDelaySeconds()).isZero();
+		assertThat(lag.averageDelaySeconds()).isZero();
 	}
 
 	@Test
