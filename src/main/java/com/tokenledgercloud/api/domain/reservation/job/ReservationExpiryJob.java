@@ -5,6 +5,8 @@ import java.time.ZoneOffset;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -16,6 +18,9 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * 만료 예약 회수를 주기적으로 실행한다(이슈 #17). 기본은 꺼져 있고
  * {@code token-pilot.reservation.expiry.enabled=true}일 때만 등록된다.
+ *
+ * <p>재시작 복구: 서버가 꺼져 있던 동안 만료된 예약은 첫 주기를 기다리지 않고 기동 직후 바로 회수한다.
+ * 예약·정산 상태는 모두 DB에 있으므로, 메모리에서 복구할 것은 없고 이 회수만 하면 된다.
  *
  * <p>한 번 실행할 때 batch-size만큼씩 최대 max-batches번 회수한다. 밀린 예약이 많아도 한 번에 너무 오래 잡고 있지 않게 하고,
  * 남은 것은 다음 주기에 이어서 처리한다. 여러 서버에서 동시에 돌아도 회수 정산은 예약마다 한 번만 적용된다.
@@ -43,6 +48,14 @@ public class ReservationExpiryJob {
 		this.expiryService = expiryService;
 		this.batchSize = batchSize;
 		this.maxBatches = maxBatches;
+	}
+
+	// 재시작 복구. 앱이 요청을 받을 준비가 끝난 직후 한 번 회수한다.
+	@EventListener(ApplicationReadyEvent.class)
+	public void recoverOnStartup() {
+		ExpiryResult result = runOnce(LocalDateTime.now(ZoneOffset.UTC));
+		log.info("Startup reservation recovery: released={}, reconciliationRequired={}, skipped={}",
+				result.released(), result.reconciliationRequired(), result.skipped());
 	}
 
 	// 주기 실행. 이전 실행이 끝난 뒤 interval만큼 쉬고 다시 돈다. (기본 1분)
