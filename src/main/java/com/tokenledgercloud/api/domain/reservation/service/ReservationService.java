@@ -91,12 +91,32 @@ public class ReservationService {
 	 * 같은 키에 다른 본문은 409 IDEMPOTENCY_CONFLICT, 종료 상태에 다른 정산은 409 CONFLICT다.
 	 * {@code exp:}로 시작하는 키는 만료 회수 전용이라 400이다. 클라이언트가 다른 예약의 회수 키를 먼저 차지하면
 	 * 그 예약은 회수 기록을 남길 수 없어 영영 닫히지 않는다.
+	 * {@code ops:}로 시작하는 키도 운영자 수동 정산 전용이라 400이다. 클라이언트 정산이 운영자 기록처럼 보이면 안 된다.
 	 */
 	public SettlementResult settle(SettlementCommand command) {
 		if (command.idempotencyKey().startsWith(ReservationExpiryService.KEY_PREFIX)) {
 			throw new ApiException(ErrorCode.INVALID_INPUT,
 					"Idempotency-Key prefix " + ReservationExpiryService.KEY_PREFIX + " is reserved for server expiry");
 		}
+		if (command.idempotencyKey().startsWith(ReservationOpsService.KEY_PREFIX)) {
+			throw new ApiException(ErrorCode.INVALID_INPUT,
+					"Idempotency-Key prefix " + ReservationOpsService.KEY_PREFIX + " is reserved for operators");
+		}
+		return apply(command);
+	}
+
+	/**
+	 * 운영자 수동 정산. 권한 확인과 키 접두사({@code ops:})는 {@link ReservationOpsService}가 맡는다.
+	 */
+	SettlementResult settleByOperator(SettlementCommand command) {
+		if (!command.idempotencyKey().startsWith(ReservationOpsService.KEY_PREFIX)) {
+			throw new IllegalArgumentException("operator settlements must use the " + ReservationOpsService.KEY_PREFIX + " prefix");
+		}
+		return apply(command);
+	}
+
+	// 정산 한 건을 적용한다. 다른 예약과 키가 동시에 부딪히면 한 번 다시 읽어 비교한다.
+	private SettlementResult apply(SettlementCommand command) {
 		try {
 			return reservationTx.settle(command);
 		} catch (DataIntegrityViolationException exception) {
