@@ -8,7 +8,7 @@ ENFORCE + ALLOW 판정이 잡아두는 예산 예약과 그 정산을 MySQL에 �
 | 2 | 정산 API `POST /api/control/v1/reservations/{id}/settlements` | 후속 |
 | 3a | 만료 예약 회수 서비스(`ReservationExpiryService`) | 이 PR |
 | 3b | 회수 주기 실행(`ReservationExpiryJob`)과 재시작 복구 | 이 PR |
-| 3c | 운영 API: 미정산 예약 조회, 수동 정산(COMMIT·WRITE_OFF), 회수 수동 실행 | 후속 |
+| 3c | 운영 API: 예약 조회, 운영자 수동 정산(COMMIT·WRITE_OFF) | 이 PR |
 | - | 판정 API(#15)에서 `PolicyContextService.capture` 다음에 `ReservationService.reserve` 호출 | #15 |
 
 ## 계약(control-plane-v1.yaml, #32)과 맞춘 부분
@@ -65,6 +65,24 @@ ADR 0001 §6을 그대로 따른다(`ReservationState`). 정산 종류(`Settleme
 - `token-pilot.reservation.expiry.enabled=true`일 때만 켜진다(기본 꺼짐). `interval`(기본 1분)마다 `batch-size`(100)씩 최대 `max-batches`(10)번 회수하고, 남은 것은 다음 주기에 처리한다.
 - **재시작 복구**: 예약·정산 상태는 모두 DB에 있어 메모리에서 복구할 것이 없다. 서버가 꺼져 있던 동안 만료된 예약만 남으므로, 기동 직후(`ApplicationReadyEvent`) 한 번 회수한다.
 - `ReservationRestartRecoveryTest`가 같은 DB로 두 번째 애플리케이션을 띄워 이를 확인한다. 버려진 예약은 RECONCILIATION_REQUIRED로 닫히고 금액은 부채로 남으며, 재시작 뒤 늦게 온 COMMIT도 정산된다.
+
+## 운영 API
+
+로그인한 회원만 쓸 수 있고(`/api/reservations/**`), 프로젝트 권한은 정책 API와 같은 `PolicyAccess`로 확인한다. 다른 조직 프로젝트는 존재도 알려주지 않는다(404).
+
+| API | 권한 | 설명 |
+| --- | --- | --- |
+| `GET /api/reservations/projects/{projectId}?state=&limit=` | OWNER·ADMIN·OPERATOR·VIEWER | 예약 목록. `state`가 없으면 아직 예산을 잡고 있는 RESERVED·IN_FLIGHT·RECONCILIATION_REQUIRED. 쉼표로 여러 상태, `limit` 1~500(기본 50) |
+| `GET /api/reservations/projects/{projectId}/{reservationId}` | OWNER·ADMIN·OPERATOR·VIEWER | 예약 한 건과 정산 이력. 이력마다 출처(CLIENT·EXPIRY·OPERATOR)를 표시한다 |
+| `POST /api/reservations/projects/{projectId}/{reservationId}/reconcile` | OWNER·ADMIN, 활성 프로젝트 | 운영자 수동 정산. `Idempotency-Key` 헤더 필수 |
+
+수동 정산 본문: `{"action": "COMMIT" | "WRITE_OFF", "totalCostUsd": "0.17", "occurredAt": "...", "reason": "..."}`
+
+- **COMMIT**: 청구서 등으로 확인한 실제 비용으로 확정한다. 토큰 수는 알 수 없어 0으로 기록한다.
+- **WRITE_OFF**: 끝내 확인하지 못한 예약을 예약 금액으로 확정한다. RECONCILIATION_REQUIRED에서만 가능하다(상태 전이 규칙).
+- 운영자는 RELEASE·RECONCILIATION_REQUIRED를 고를 수 없다. 그건 SDK와 만료 회수가 정한다.
+- 정산 키는 `ops:<Idempotency-Key>`다. `exp:`처럼 서버 전용이라 클라이언트 정산에서 이 접두사는 400이다. 같은 키·같은 본문의 재시도는 처음 결과를, `occurredAt`까지 같지 않으면 409를 돌려준다.
+- `reason`은 필수다. 누가(회원 id) 어느 예약을 무엇으로 왜 닫았는지 감사 로그(INFO)에 남긴다. DB에 감사 컬럼을 두는 것은 후속 과제다.
 
 ## 동시성
 
