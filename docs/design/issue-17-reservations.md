@@ -1,6 +1,6 @@
-# #17 예산 예약·정산 상태 머신 (1단계: 저장소와 상태 머신)
+# #17 예산 예약·정산 상태 머신
 
-ENFORCE + ALLOW 판정이 잡아두는 예산 예약과 그 정산을 MySQL에 저장한다. 이번 단계는 테이블, 엔티티, 상태 머신, 서비스까지이며 API는 연결하지 않았다.
+ENFORCE + ALLOW 판정이 잡아두는 예산 예약과 그 정산을 MySQL에 저장한다. 저장소·상태 머신, 정산 API, 만료 회수·재시작 복구, 운영 API까지 구현했다. 운영 절차는 [예산 예약 운영 런북](../runbooks/reservation-operations.md)에 있다.
 
 | 단계 | 내용 | 상태 |
 | --- | --- | --- |
@@ -9,6 +9,7 @@ ENFORCE + ALLOW 판정이 잡아두는 예산 예약과 그 정산을 MySQL에 �
 | 3a | 만료 예약 회수 서비스(`ReservationExpiryService`) | 이 PR |
 | 3b | 회수 주기 실행(`ReservationExpiryJob`)과 재시작 복구 | 이 PR |
 | 3c | 운영 API: 예약 조회, 운영자 수동 정산(COMMIT·WRITE_OFF) | 이 PR |
+| 4 | 실제 MySQL 통합 테스트(`ReservationMySqlIntegrationTest`), 운영 런북 | 이 PR |
 | - | 판정 API(#15)에서 `PolicyContextService.capture` 다음에 `ReservationService.reserve` 호출 | #15 |
 
 ## 계약(control-plane-v1.yaml, #32)과 맞춘 부분
@@ -19,7 +20,7 @@ ENFORCE + ALLOW 판정이 잡아두는 예산 예약과 그 정산을 MySQL에 �
 | 정산 재전송은 결과가 아니라 본문 비교, `occurredAt`까지 같아야 원래 결과 | 정산 요청마다 `budget_reservation_settlements`에 본문 지문(reservationId, requestId, result, usage, cost 전체, occurredAt)과 결과를 남긴다. 같은 키·같은 지문이면 저장된 결과를 `duplicate: true`로, 지문이 다르면 `409 IDEMPOTENCY_CONFLICT`. |
 | COMMIT 금액 기준은 `cost.totalCostUsd`, 분할이 서버 계산과 달라도 거부하지 않음 | `SettlementCommand.totalCostUsd()`만 쓴다. prompt·completion 분할은 지문에만 들어간다. |
 | 응답 `requestId`는 요청 값을 그대로 | 요청 `requestId`가 예약과 다르면 400. 응답에는 요청 값을 그대로 넣는다. |
-| 판정 API가 없으면 404 → INDETERMINATE | #15 범위. 이 단계는 API가 없다. |
+| 판정 API가 없으면 404 → INDETERMINATE | 정산 API도 `token-pilot.decision.enabled`일 때만 등록되어, 꺼져 있으면 404다. |
 
 ## 예산 범위 (#14)
 
@@ -109,9 +110,29 @@ ADR 0001 §6을 그대로 따른다(`ReservationState`). 정산 종류(`Settleme
 - **정산**: 예약 행 → 프로젝트 카운터 → 환경 카운터 순으로 잠그고, 상태·카운터·정산 기록을 한 트랜잭션에서 바꾼다. 같은 정산이 동시에 와도 한 번만 반영된다.
 - **잠금 순서**: 예약은 카운터만(프로젝트 → 환경), 정산은 예약 → 프로젝트 → 환경. 순환 대기가 없다. 데드락·락 타임아웃은 재시도 가능한 `503 INGESTION-503`.
 - 쓰기 트랜잭션은 #14와 같이 `READ_COMMITTED`다. 잠금을 기다린 뒤 읽는 값이 방금 커밋된 최신 값이어야 하기 때문이다.
-- 테스트(`ReservationConcurrencyTest`)는 H2 기반이다. 실제 UNIQUE 제약과 행 잠금은 걸리지만 MySQL 잠금 거동 자체는 아니다. MySQL에서는 `PolicyMySqlIntegrationTest`처럼 `ddl-auto=validate`로 매핑을 확인해야 한다(후속).
+- `ReservationConcurrencyTest`는 H2 기반이다. 실제 UNIQUE 제약과 행 잠금은 걸리지만 MySQL 잠금 거동 자체는 아니다.
+- `ReservationMySqlIntegrationTest`가 실제 MySQL에서 같은 경쟁을 돌린다. `RESERVATION_TEST_MYSQL_URL`이 있을 때만 실행하고(`PolicyMySqlIntegrationTest`와 같은 방식), Flyway V1~V11 적용 뒤 `ddl-auto=validate`로 매핑을 확인한다. 동시 예약 한도, 같은 키 동시 예약(실패는 재시도 가능 503만), 같은 정산 중복 방지, `utf8mb4_bin` 대소문자 구분, 만료 뒤 늦은 COMMIT을 확인한다.
 
 ## 정해야 할 것
 
 - **한도에 무엇을 넣을지**: 카운터는 예약 경로의 금액만 안다. 예약 없이 들어온 사용량(Observe 원장)을 한도에서 뺄지는 #15가 `projectBudgetLimitUsd`·`environmentBudgetLimitUsd`를 계산할 때 정한다(예: 월 예산 − 원장 누적).
 - **IN_FLIGHT 신호**: 계약에 RESERVED → IN_FLIGHT를 알리는 API가 없다. 지금은 정산이 오면 거친 것으로 본다. 만료 회수(3단계)에서 RESERVED 만료를 RELEASED(ADR)로 둘지, 호출 여부를 모르니 RECONCILIATION_REQUIRED로 둘지 결정이 필요하다.
+
+## 완료 기준 대응
+
+| #17 기준 | 구현 | 테스트 |
+| --- | --- | --- |
+| 동시 요청이 와도 한도를 넘겨 예약하지 않음 | 카운터 행 잠금 후 두 범위 한도 확인 | `ReservationConcurrencyTest`, `ReservationMySqlIntegrationTest` |
+| 같은 정산이 여러 번 와도 비용은 한 번 | 정산 키 UNIQUE, 본문 지문 비교, 예약 행 잠금 | `ReservationServiceTest`, `ReservationConcurrencyTest`, `ReservationSettlementHttpTest` |
+| 상태 전이가 ADR 0001 §6을 따름 | `ReservationState.canTransitionTo`, 종료 상태 409 | `ReservationStateTest`, `ReservationServiceTest` |
+| 정산 API (계약 `settleReservation`) | `ReservationSettlementController` | `ReservationSettlementHttpTest` |
+| 만료 예약 회수, 재시작 복구 | `ReservationExpiryService`, `ReservationExpiryJob` | `ReservationExpiryServiceTest`, `ReservationExpiryJobTest`, `ReservationRestartRecoveryTest` |
+| 운영자 조회·수동 정산 | `ReservationOpsController` | `ReservationOpsIntegrationTest` |
+| 실제 MySQL 스키마·잠금 | V10 + `ddl-auto=validate` | `ReservationMySqlIntegrationTest` (MySQL URL 필요) |
+| 운영 문서 | | [운영 런북](../runbooks/reservation-operations.md) |
+
+## 남은 것 (다른 이슈 또는 팀 결정)
+
+- 판정 API(#15)에서 `ReservationService.reserve` 호출 연결.
+- 수동 정산 감사 정보를 DB 컬럼으로 남길지 (지금은 감사 로그).
+- OPERATOR 역할에도 수동 정산을 허용할지 (지금은 OWNER·ADMIN).
