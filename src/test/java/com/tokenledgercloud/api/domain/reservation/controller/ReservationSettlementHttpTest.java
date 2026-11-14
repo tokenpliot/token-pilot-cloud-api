@@ -203,6 +203,7 @@ class ReservationSettlementHttpTest {
 		// 짧은 Idempotency-Key, 서버 전용 접두사
 		assertThat(post(id, key, "short", release("req-1")).statusCode()).isEqualTo(400);
 		assertThat(post(id, key, "exp:" + id, release("req-1")).statusCode()).isEqualTo(400);
+		assertThat(post(id, key, "ops:pretend-operator", release("req-1")).statusCode()).isEqualTo(400);
 		// 예약을 만든 요청과 다른 requestId
 		assertThat(post(id, key, "stl:" + id + ":RELEASE", release("req-other")).statusCode()).isEqualTo(400);
 	}
