@@ -5,7 +5,7 @@ ENFORCE + ALLOW 판정이 잡아두는 예산 예약과 그 정산을 MySQL에 �
 | 단계 | 내용 | 상태 |
 | --- | --- | --- |
 | 1 | V10 마이그레이션, 엔티티, 상태 머신, 원자적 예약·정산 서비스, 동시성 테스트 | 이 PR |
-| 2 | 정산 API `POST /api/control/v1/reservations/{id}/settlements` | 후속 |
+| 2 | 정산 API `POST /api/control/v1/reservations/{id}/settlements` | 이 PR |
 | 3a | 만료 예약 회수 서비스(`ReservationExpiryService`) | 이 PR |
 | 3b | 회수 주기 실행(`ReservationExpiryJob`)과 재시작 복구 | 이 PR |
 | 3c | 운영 API: 예약 조회, 운영자 수동 정산(COMMIT·WRITE_OFF) | 이 PR |
@@ -46,6 +46,25 @@ ADR 0001 §6을 그대로 따른다(`ReservationState`). 정산 종류(`Settleme
 - **결과를 모르면 0원으로 두지 않는다.** RECONCILIATION_REQUIRED는 예약 금액을 계속 잡아두고, WRITE_OFF도 예약 금액을 비용으로 확정한다.
 - **늦게 온 실제 사용량**: RECONCILIATION_REQUIRED에 COMMIT이 오면 그때 확정하고 남은 금액을 돌려준다. 앞서 보낸 RECONCILIATION_REQUIRED의 재전송은 그때 결과를 그대로 받는다(키가 결과마다 달라서).
 - 종료 상태에 다른 결과를 요구하면 `409 COMMON-409`.
+
+## 정산 API
+
+`POST /api/control/v1/reservations/{reservationId}/settlements` (control-plane-v1.yaml의 `settleReservation`). 판정 API와 같이 `token-pilot.decision.enabled=true`일 때만 등록된다. 예약은 판정이 발급하므로 판정 API가 꺼져 있으면 정산할 것도 없다.
+
+| 순서 | 검사 | 실패 |
+| --- | --- | --- |
+| 1 | `X-API-Key` 있음 | 401 (본문 검증 전) |
+| 2 | 본문 계약(정의되지 않은 필드, schemaVersion, result별 usage·cost), `Idempotency-Key` 8~128자 | 400 `INVALID_REQUEST`, 필드별 이유 (값은 싣지 않음) |
+| 3 | 프로젝트 키 유효·만료·프로젝트 활성 | 401 / 403 |
+| 4 | 예약이 키의 프로젝트 것 | 404 (다른 프로젝트의 예약은 존재를 알려주지 않음) |
+| 5 | 키에 환경 제한이 있으면 예약의 환경과 같음 | 403 |
+| 6 | `exp:`·`ops:` 접두사, 예약의 requestId와 같음 | 400 |
+| 7 | 정산: 같은 키·같은 본문은 처음 결과(`duplicate: true`), 같은 키에 다른 본문 409 `IDEMPOTENCY_CONFLICT`, 종료 상태에 다른 결과 409 | |
+
+- 본문에 projectKey·environment가 없어서, 키 인증은 `ProjectApiKeyAuthenticator.authenticateForProjectResource`(환경 검사 없이)로 하고 예약을 찾은 뒤 `requireEnvironment`로 환경을 확인한다.
+- 오류는 판정 API와 같은 계약 형식이다(`ControlPlaneExceptionHandler`, `data.outcome`은 상태코드로 정해진 INDETERMINATE 또는 CONTROL_PLANE_UNAVAILABLE).
+- 경로는 `IngestionPaths`에 프로젝트 키 경로로 등록해, 회원 키 필터가 `X-API-Key`를 가로채지 않고 단건 크기 제한도 받는다. 비교는 정규화한 경로로 해서 `%73ettlements` 같은 철자도 같게 다룬다.
+- 클라이언트는 `WRITE_OFF`를 보낼 수 없다(운영자 전용).
 
 ## 만료 예약 회수
 
