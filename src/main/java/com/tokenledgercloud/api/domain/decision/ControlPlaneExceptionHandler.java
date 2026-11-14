@@ -28,7 +28,8 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @Order(Ordered.HIGHEST_PRECEDENCE)
 @RestControllerAdvice(assignableTypes = {DecisionController.class,
-	com.tokenledgercloud.api.domain.shadow.controller.ExecutionEventController.class})
+	com.tokenledgercloud.api.domain.shadow.controller.ExecutionEventController.class,
+	com.tokenledgercloud.api.domain.reservation.controller.ReservationSettlementController.class})
 public class ControlPlaneExceptionHandler {
 
 	/** 동시 요청 충돌을 풀지 못했을 때. 같은 요청을 다시 보내면 안전하므로 곧바로 재시도할 수 있다. */
