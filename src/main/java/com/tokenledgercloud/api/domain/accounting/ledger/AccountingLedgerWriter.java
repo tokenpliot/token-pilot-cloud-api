@@ -8,6 +8,7 @@ import org.springframework.dao.ConcurrencyFailureException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
+import com.tokenledgercloud.api.domain.accounting.AccountingStatus;
 import com.tokenledgercloud.api.domain.usage.entity.UsageLog;
 import com.tokenledgercloud.api.global.exception.ApiException;
 import com.tokenledgercloud.api.global.exception.ErrorCode;
@@ -49,6 +50,20 @@ public class AccountingLedgerWriter {
 	 *                      동시 요청을 풀지 못했으면 INGESTION_RETRY_LATER
 	 */
 	public AccountingLedgerResult record(AccountingLedgerCommand command) {
+		return record(command, AccountingStatus.PENDING);
+	}
+
+	/**
+	 * 처음 회계 상태를 정해서 이벤트를 기록한다. 귀속이 불확실한 이벤트는 QUARANTINED로 남긴다. (#41)
+	 * 같은 이벤트가 이미 있으면 상태와 상관없이 처음 기록을 돌려준다.
+	 *
+	 * @param accountingStatus PENDING 또는 QUARANTINED. 기존 행 전용(LEGACY_UNVERIFIED)이나 검증 완료(VERIFIED)는
+	 *                         수집 시점에 정할 수 없으므로 받지 않는다.
+	 */
+	public AccountingLedgerResult record(AccountingLedgerCommand command, AccountingStatus accountingStatus) {
+		if (accountingStatus != AccountingStatus.PENDING && accountingStatus != AccountingStatus.QUARANTINED) {
+			throw new IllegalArgumentException("new events start as PENDING or QUARANTINED, not " + accountingStatus);
+		}
 		// 1. 먼저 같은 이벤트가 이미 있는지 확인한다.
 		Optional<AccountingLedgerResult> existing = findDuplicate(
 				command.projectId(), command.environment(), command.eventId(), command.payloadFingerprint());
@@ -57,7 +72,7 @@ public class AccountingLedgerWriter {
 		}
 		try {
 			// 2. 없으면 이벤트와 원장 값을 한 트랜잭션에 저장한다.
-			String usageEventId = ledgerTx.insertEventWithValue(command);
+			String usageEventId = ledgerTx.insertEventWithValue(command, accountingStatus);
 			return new AccountingLedgerResult(usageEventId, false);
 		} catch (ConcurrencyFailureException exception) {
 			// 교착 상태나 잠금 대기 초과: 아무것도 저장되지 않았으므로 같은 요청을 다시 보내도 안전하다.

@@ -39,10 +39,12 @@ public class AccountingLedgerTx {
 	/**
 	 * 이벤트와 첫 번째 원장 값을 한 트랜잭션에 저장한다. 하나라도 실패하면 둘 다 롤백된다.
 	 * 항상 새 트랜잭션에서 실행해서, 중복 키 오류가 호출자의 트랜잭션을 망가뜨리지 않게 한다.
+	 *
+	 * @param accountingStatus 이벤트의 처음 회계 상태. 신규 수집은 PENDING, 귀속이 불확실하면 QUARANTINED다. (#41)
 	 */
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
-	public String insertEventWithValue(AccountingLedgerCommand command) {
-		// usage_events 행을 만든다. 상태는 PENDING(신규 수집)으로 시작한다.
+	public String insertEventWithValue(AccountingLedgerCommand command, AccountingStatus accountingStatus) {
+		// usage_events 행을 만든다. 상태는 호출자가 정한 처음 상태(PENDING 또는 QUARANTINED)다.
 		UsageLog event = UsageLog.builder()
 				.organizationId(command.organizationId())
 				.projectId(command.projectId())
@@ -72,7 +74,7 @@ public class AccountingLedgerTx {
 				// v1과 같이 금지 키를 뺀 metadata JSON을 그대로 저장한다.
 				.metadataJson(command.metadataJson())
 				.occurredAt(command.occurredAt())
-				.accountingStatus(AccountingStatus.PENDING.name())
+				.accountingStatus(accountingStatus.name())
 				.callStatus(command.callStatus().name())
 				.settlementState(settlementOf(command).name())
 				// 기록 주체도 UNKNOWN이 아니라 호출자가 넘긴 값으로 남긴다.
