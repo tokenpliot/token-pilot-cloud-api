@@ -43,4 +43,4 @@ const lastReceived = new Date(data.lastReceivedAt + "Z"); // UTC로 해석
 
 ## 관련
 
-- 미귀속 비용(`/api/observe/ledger/unattributed-cost`)은 `QUARANTINED` 이벤트만 센다. 지금은 이 상태로 바꾸는 코드가 없어 항상 0이다. "미귀속"의 정의가 정해지면 따로 처리한다(#11 남은 항목).
+- 미귀속 비용(`/api/observe/ledger/unattributed-cost`)은 `QUARANTINED` 이벤트를 센다. 프로젝트에 등록되지 않은 환경으로 들어온 이벤트가 여기에 해당한다([#41 설계](../design/issue-41-unattributed-cost.md)). 이런 이벤트도 수집 지연의 `eventCount`와 `unsettledCount`에는 포함된다.
