@@ -1,14 +1,18 @@
 package com.tokenledgercloud.api.domain.rollout.breakglass;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -20,6 +24,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import com.tokenledgercloud.api.domain.rollout.breakglass.dto.BreakGlassGrantResponse;
+import com.tokenledgercloud.api.domain.rollout.breakglass.dto.BreakGlassUsageResponse;
 import com.tokenledgercloud.api.global.exception.ApiException;
 import com.tokenledgercloud.api.global.exception.ErrorCode;
 import com.tokenledgercloud.api.global.exception.GlobalExceptionHandler;
@@ -30,6 +35,9 @@ class BreakGlassControllerTest {
 
 	@Mock
 	private BreakGlassService breakGlassService;
+
+	@Mock
+	private BreakGlassUsageService breakGlassUsageService;
 
 	@InjectMocks
 	private BreakGlassController controller;
@@ -58,6 +66,25 @@ class BreakGlassControllerTest {
 				.andExpect(jsonPath("$.data.grantId").value("g-1"))
 				.andExpect(jsonPath("$.data.status").value("ACTIVE"))
 				.andExpect(jsonPath("$.data.expiresAt").value("2026-11-10T09:30:00Z"));
+	}
+
+	@Test
+	void usageReturnsWithinAndOutsideWindowSummaries() throws Exception {
+		OffsetDateTime issuedAt = OffsetDateTime.of(2026, 11, 10, 9, 0, 0, 0, ZoneOffset.UTC);
+		var within = new BreakGlassUsageResponse.Summary(2, 300, new BigDecimal("0.250000"), 1, 0,
+				BigDecimal.ZERO, 0, Map.of("SUCCEEDED", 2L));
+		var outside = new BreakGlassUsageResponse.Summary(0, 0, BigDecimal.ZERO, 0, 0,
+				BigDecimal.ZERO, 0, Map.of());
+		given(breakGlassUsageService.getUsage(any(), eq("g-1"), any()))
+				.willReturn(new BreakGlassUsageResponse("g-1", "p-1", "prod", BreakGlassStatus.ACTIVE, issuedAt,
+						issuedAt.plusMinutes(30), within, outside, issuedAt.plusMinutes(10)));
+
+		mockMvc().perform(get("/api/rollout/break-glass/g-1/usage"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.withinWindow.events").value(2))
+				.andExpect(jsonPath("$.data.withinWindow.actualCostUsd").value(0.25))
+				.andExpect(jsonPath("$.data.withinWindow.callStatusCounts.SUCCEEDED").value(2))
+				.andExpect(jsonPath("$.data.windowEnd").value("2026-11-10T09:30:00Z"));
 	}
 
 	@Test

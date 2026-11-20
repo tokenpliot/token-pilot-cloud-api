@@ -19,6 +19,7 @@ import com.tokenledgercloud.api.domain.rollout.breakglass.dto.BreakGlassActiveRe
 import com.tokenledgercloud.api.domain.rollout.breakglass.dto.BreakGlassGrantResponse;
 import com.tokenledgercloud.api.domain.rollout.breakglass.dto.BreakGlassIssueRequest;
 import com.tokenledgercloud.api.domain.rollout.breakglass.dto.BreakGlassRevokeRequest;
+import com.tokenledgercloud.api.domain.rollout.breakglass.dto.BreakGlassUsageResponse;
 import com.tokenledgercloud.api.global.response.ApiResponse;
 
 import jakarta.validation.Valid;
@@ -34,6 +35,7 @@ import lombok.RequiredArgsConstructor;
 public class BreakGlassController {
 
 	private final BreakGlassService breakGlassService;
+	private final BreakGlassUsageService breakGlassUsageService;
 
 	// POST /api/rollout/break-glass (OWNER/ADMIN/OPERATOR)
 	@PostMapping
@@ -72,6 +74,15 @@ public class BreakGlassController {
 			@RequestParam(required = false) Integer limit) {
 		return ResponseEntity.ok(ApiResponse.success("break-glass 이력 조회 성공",
 				breakGlassService.getHistory(authentication, projectId, environment, limit, nowUtc())));
+	}
+
+	// GET /api/rollout/break-glass/{grantId}/usage (우회 호출 사용량·비용, 조직 멤버)
+	@GetMapping("/{grantId}/usage")
+	public ResponseEntity<ApiResponse<BreakGlassUsageResponse>> usage(
+			Authentication authentication,
+			@PathVariable String grantId) {
+		return ResponseEntity.ok(ApiResponse.success("break-glass 사용량 조회 성공",
+				breakGlassUsageService.getUsage(authentication, grantId, nowUtc())));
 	}
 
 	private LocalDateTime nowUtc() {

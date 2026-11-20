@@ -30,6 +30,12 @@ import lombok.NoArgsConstructor;
 @Builder
 public class BreakGlassGrant {
 
+	/**
+	 * 우회 호출의 사용량 이벤트 metadata에 grant id를 담는 키. SDK와 서버가 같은 이름을 써야 한다.
+	 * ingestion metadata 키 규칙(^[a-z][a-z0-9_.-]{0,63}$)에 맞춘 이름이다.
+	 */
+	public static final String USAGE_METADATA_KEY = "break_glass_grant_id";
+
 	@Id
 	@Column(length = 36)
 	private String id;
