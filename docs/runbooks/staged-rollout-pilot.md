@@ -210,7 +210,7 @@ API 오류: 판정 API는 정책 거부를 `200`+`outcome`으로, 중앙 장애�
 | 동시성 | 같은 사용량 이벤트 재전송 → 원장 1건 | `ObserveIngestionServiceTest.sameEventSentTwiceIsRecordedOnce`, `AccountingLedgerWriterTest` | 자동 테스트 통과 |
 | 재시작 | 서버가 꺼진 동안 만료된 예약을 재시작 후 회수 | `ReservationRestartRecoveryTest` | 자동 테스트 통과 |
 | 재시작 | 재시작 후 원장 상태 조회 | `ObserveIngestionHttpIntegrationTest.ledgerStateCanBeQueriedAfterARestart` | 자동 테스트 통과 |
-| 재시작 | 재시작 후 break-glass 유효 여부 | 상태를 메모리가 아니라 DB 행과 조회 시각으로 판정하므로 재시작과 무관(설계). 배치 없이 만료되는 것은 `BreakGlassServiceTest.grantStopsBeingActiveAtExpiryWithoutAnyJob` | 만료 동작만 자동 테스트 통과. 재시작 자체는 **미실시** |
+| 재시작 | 발급·취소 뒤 같은 DB로 서버 재기동 → 유효 grant 유지, 만료 시각에 무효, 취소 상태 유지, 같은 범위 중복 발급 409, 재시작 전 우회 호출 집계 | `BreakGlassRestartTest` | 자동 테스트 통과 |
 | 중앙 장애 | DB 장애 → 503 `CONTROL_PLANE_UNAVAILABLE`, 정책 거부로 바뀌지 않음 | `ControlPlaneExceptionHandlerTest`, `ControlPlaneUnavailableMetricsTest` | 자동 테스트 통과 |
 | 네트워크 | 서버 다운 중 SDK Observe 전송 | #13 E2E(2026-10-28): 3건 모두 provider 응답 유지, 이벤트당 4회 재시도 후 `RETRIES_EXHAUSTED` | 실환경 확인. **긴 중단 시 이벤트 유실**(SDK 재시도 약 5초) |
 | 네트워크 | 키 폐기 후 전송 | #13 E2E: `REQUEST_REFUSED`, 재시도 없음, 원장 변화 없음 | 실환경 확인 |
