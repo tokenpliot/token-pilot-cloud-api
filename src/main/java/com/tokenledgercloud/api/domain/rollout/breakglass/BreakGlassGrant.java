@@ -17,7 +17,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 /**
- * 한 프로젝트·환경의 Enforce를 만료 시간까지 우회하는 break-glass 권한. (V8 break_glass_grants)
+ * 한 프로젝트·환경의 Enforce를 만료 시간까지 우회하는 break-glass 권한. (V12 break_glass_grants)
  * 행 자체가 감사 기록이다: 누가·왜·언제 발급했고 누가·왜·언제 취소했는지를 지우지 않고 남긴다.
  * 시각은 모두 UTC로 저장한다.
  */
