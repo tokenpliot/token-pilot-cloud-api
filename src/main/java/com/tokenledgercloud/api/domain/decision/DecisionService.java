@@ -39,6 +39,7 @@ import com.tokenledgercloud.api.domain.policy.PolicyContextService.ContextView;
 import com.tokenledgercloud.api.domain.policy.PolicyVersionView;
 import com.tokenledgercloud.api.domain.pricing.entity.PricingPlan;
 import com.tokenledgercloud.api.domain.pricing.repository.PricingPlanRepository;
+import com.tokenledgercloud.api.domain.rollout.metrics.RolloutMetrics;
 import com.tokenledgercloud.api.global.exception.ApiException;
 import com.tokenledgercloud.api.global.exception.ErrorCode;
 
@@ -151,6 +152,8 @@ public class DecisionService {
 		requireNoOuterTransaction();
 		try {
 			recordTx.insert(record);
+			// [이슈 #19] 새로 저장된 판정만 결과별로 센다. 재전송·동시 요청 충돌로 기존 판정을 돌려줄 때는 세지 않는다.
+			RolloutMetrics.decision(evaluation.outcome());
 			return response;
 		} catch (DataIntegrityViolationException exception) {
 			return resolveRace(key.projectId(), idempotencyKey, fingerprint, context.context().getId(), exception);

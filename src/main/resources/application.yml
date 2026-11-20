@@ -67,6 +67,15 @@ jwt:
   secret: ${JWT_SECRET}
   expiration: 86400000 # 24시간 (밀리초 단위)
 
+# [이슈 #19] 운영 지표를 Prometheus 형식으로 노출한다(/actuator/prometheus).
+# 정책 거부·중앙 장애·provider 실패를 tokenpilot_* 지표로 나눠 센다(RolloutMetrics). 태그에 고객 id는 없다.
+# 주의: SecurityConfig가 /actuator/**를 permitAll로 열어 두었으므로 운영 배포 전에 접근 제한이 필요하다.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+
 # --- Ingestion limits and privacy (optional; the values below are the built-in defaults) ---
 # token-pilot:
 #   ingestion:

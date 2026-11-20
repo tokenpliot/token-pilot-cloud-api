@@ -28,6 +28,7 @@ import com.tokenledgercloud.api.domain.rollout.breakglass.dto.BreakGlassActiveRe
 import com.tokenledgercloud.api.domain.rollout.breakglass.dto.BreakGlassGrantResponse;
 import com.tokenledgercloud.api.domain.rollout.breakglass.dto.BreakGlassIssueRequest;
 import com.tokenledgercloud.api.domain.rollout.breakglass.dto.BreakGlassRevokeRequest;
+import com.tokenledgercloud.api.domain.rollout.metrics.RolloutMetrics;
 import com.tokenledgercloud.api.global.exception.ApiException;
 import com.tokenledgercloud.api.global.exception.ErrorCode;
 
@@ -93,6 +94,7 @@ public class BreakGlassService {
 					"break-glass 발급: " + grant.getEnvironment() + " 범위의 Enforce를 " + request.durationMinutes()
 							+ "분 동안 우회합니다.",
 					access.memberId(), grant.getReason(), now);
+			RolloutMetrics.breakGlass("ISSUED");
 			return BreakGlassGrantResponse.of(grant, now);
 		} catch (DataIntegrityViolationException | OptimisticLockingFailureException exception) {
 			// 다른 요청이 같은 범위에 먼저 발급했다. 유니크 제약 또는 버전 충돌로 이쪽만 실패한다.
@@ -121,6 +123,7 @@ public class BreakGlassService {
 		recordEvent(grant, "INFO", "BREAK_GLASS_REVOKED",
 				"break-glass 취소: " + grant.getEnvironment() + " 범위의 Enforce 우회를 종료합니다.",
 				access.memberId(), request.reason(), now);
+		RolloutMetrics.breakGlass("REVOKED");
 		return BreakGlassGrantResponse.of(grant, now);
 	}
 
