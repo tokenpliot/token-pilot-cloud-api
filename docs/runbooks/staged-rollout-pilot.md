@@ -25,7 +25,7 @@ Shadow·rollout 선언·보고서 형식 [shadow-audit.md](../api/shadow-audit.m
 | Observe 수집 v2 | `token-pilot.observe.ingestion.enabled=true` | 우회 호출의 사용량·비용 기록에 필요 |
 | Shadow | `token-pilot.shadow.enabled=true` | 시뮬레이션·rollout 선언·집행 보고 API |
 | 예약 만료 회수 | `token-pilot.reservation.expiry.enabled=true` | 재시작 뒤 만료 예약 회수 포함 |
-| 지표 노출 | `application.yml`의 `management.endpoints.web.exposure.include=health,prometheus` | **`/actuator/**`가 인증 없이 열려 있다.** 운영에서는 네트워크나 보안 설정으로 Prometheus 수집기만 접근하게 막는다 |
+| 지표 노출 | **기본 꺼짐**(health만). 켜려면 배포 환경 변수 `MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE=health,prometheus` | `/actuator/**`가 인증 없이 열려 있으므로(SecurityConfig, 팀 공용) Prometheus 수집기만 닿는 내부망에서만 켠다. 보안 설정 정리는 팀 안건 |
 | break-glass | 별도 플래그 없음 | V12 `break_glass_grants`가 적용돼 있어야 한다 |
 
 ## 2. 시연 시나리오: shadow 검토 → opt-in Enforce → rollback
@@ -107,7 +107,7 @@ curl -sS -X POST "$BASE_URL/api/shadow/projects/$PROJECT_ID/rollout-events" \
 | --- | --- | --- |
 | 발급 | `POST /api/rollout/break-glass` `{"projectId","environment","reason","durationMinutes"}` | 사유 필수, 최대 1440분(24시간). 같은 범위에 유효한 grant가 있으면 409 → 연장은 취소 후 재발급 |
 | SDK 반영 | (SDK 기능 전까지) 고객이 SDK 모드를 ADVISORY/OBSERVE로 변경 | 우회 호출은 사용량 이벤트 metadata에 `break_glass_grant_id: <grantId>`를 붙인다 |
-| 유효 확인 | `GET /api/rollout/break-glass/active?projectId=&environment=` | `active`, 만료 시각. 만료 시각이 지나면 배치 없이 자동으로 무효 |
+| 유효 확인 | `GET /api/rollout/break-glass/active?environment=` + 헤더 `X-API-Key: $PROJECT_KEY` | 판정 API와 같은 프로젝트 API 키 인증(회원 JWT로는 401). `projectId`는 생략하면 키의 프로젝트, 주면 키의 프로젝트와 같아야 함(다르면 404). 만료 시각이 지나면 배치 없이 자동으로 무효 |
 | 사용량 확인 | `GET /api/rollout/break-glass/{grantId}/usage` | 아래 표 |
 | 취소 | `POST /api/rollout/break-glass/{grantId}/revoke` `{"reason"}` | 이미 만료·취소면 409 |
 | 사후 감사 | `GET /api/rollout/break-glass?projectId=&environment=&limit=` | 발급자·사유·발급/만료/취소 시각·취소자·취소 사유. `/api/events` 운영 이벤트 피드에도 `BREAK_GLASS_ISSUED`/`REVOKED`가 남는다 |
@@ -130,16 +130,19 @@ curl -sS -X POST "$BASE_URL/api/shadow/projects/$PROJECT_ID/rollout-events" \
 
 ### 4-1. 측정 항목
 
-임계값은 **제안값**이다. 파일럿 시작 전에 팀·고객과 확정하고 보고서에 확정값을 적는다. 관찰 기간도 함께 정한다(제안: Advisory 7일).
+아래 기준은 **잠정 기준**(2026-11-20, #19 담당 설정)이다. 팀 회의·고객 협의에서 바꿀 수 있고, 바꾸면 이 표와 보고서를 함께 고친다.
+기준 없이 파일럿을 시작하지 않도록 먼저 정해 두는 값이며, 근거를 함께 적었다.
 
-| 항목 | 측정 방법 | 출처 | 제안 기준 |
-| --- | --- | --- | --- |
-| 지연 | 판정 API 서버 처리 시간 평균·최대 | `http_server_requests_seconds_{sum,count,max}{uri="/api/control/v1/decisions"}` | 평균 < 50ms, 최대 < SDK 타임아웃의 50% |
-| 가용성 | 중앙 장애 비율 | `increase(tokenpilot_control_plane_unavailable_total[기간])` ÷ (그 값 + `increase(tokenpilot_decision_outcome_total[기간])`) | < 0.1% |
-| false denial | 오차단 후보와 고객 override | Shadow `falseDenialCandidates`, `GET .../execution-events`의 `customerOverride=ALLOW` | 후보 전부 고객 검토 완료, 확인된 오차단 0 |
-| 미정산 liability | 결과를 모르는 예약·이벤트 | `budget_reservations.state='RECONCILIATION_REQUIRED'`의 `reserved_cost_usd` 합, `GET /api/observe/ledger/reconciliation`의 `reconciliationRequiredEventCount` | 기간 끝에 미처리 0, 또는 건별 사유·담당자 기록 |
-| 이중 누적 | 같은 호출이 두 번 세지지 않는가 | 아래 SQL, 판정 지표 증가량 = `decision_records` 증가량(재시작 없는 구간) | 모두 0 / 일치 |
-| break-glass | 기간 밖 우회 호출 | `usage`의 `outsideWindow.events` | 0 |
+**관찰 기간: Advisory 7일.** 평일·주말 트래픽을 한 번씩 포함하는 최소 기간이다. 7일 동안 판정이 100건 미만이면 기간을 늘린다(비율 기준을 판단하기에 표본이 적다).
+
+| 항목 | 측정 방법 | 출처 | 잠정 기준 | 근거 |
+| --- | --- | --- | --- | --- |
+| 지연 | 판정 API 서버 처리 시간 평균·최대 | `http_server_requests_seconds_{sum,count,max}{uri="/api/control/v1/decisions"}` | 평균 < 50ms, 최대 < 500ms | SDK 판정 대기 기본값이 1초(`EnforcerConfig`, 최대 5초). 최대값을 그 절반 아래로 두어 네트워크 지연이 더해져도 타임아웃(→ `CONTROL_PLANE_UNAVAILABLE`)에 닿지 않게 한다 |
+| 가용성 | 중앙 장애 비율 | `increase(tokenpilot_control_plane_unavailable_total[기간])` ÷ (그 값 + `increase(tokenpilot_decision_outcome_total[기간])`) | < 0.1% | 1,000건에 1건 이하. 장애 시 동작이 FAIL_OPEN이면 그만큼 집행이 빠지므로, 파일럿 규모에서 고객이 체감하지 않을 수준으로 둔다 |
+| false denial | 오차단 후보와 고객 override | Shadow `falseDenialCandidates`, `GET .../execution-events`의 `customerOverride=ALLOW` | 후보 전부 고객 검토 완료, 확인된 오차단 0 | 오차단은 고객 서비스 장애로 바로 이어진다. 파일럿에서는 한 건도 허용하지 않는다 |
+| 미정산 liability | 결과를 모르는 예약·이벤트 | `budget_reservations.state='RECONCILIATION_REQUIRED'`의 `reserved_cost_usd` 합, `GET /api/observe/ledger/reconciliation`의 `reconciliationRequiredEventCount` | 기간 끝에 미처리 0, 또는 건별 사유·담당자 기록 | 결과 미확인 예약은 예산을 계속 잡고 있다(#17). 금액보다 "원인을 아는가"가 기준이다 |
+| 이중 누적 | 같은 호출이 두 번 세지지 않는가 | 아래 SQL, 판정 지표 증가량 = `decision_records` 증가량(재시작 없는 구간) | 모두 0 / 일치 | 같은 호출의 이중 반영은 비용·예산을 틀리게 만든다. DB 제약으로 막혀 있으므로 0이 아니면 버그다 |
+| break-glass | 기간 밖 우회 호출 | `usage`의 `outsideWindow.events` | 0 | 만료·취소 뒤 우회는 허가 없는 우회다 |
 
 지연 분위수(p95·p99)가 필요하면 `management.metrics.distribution.percentiles-histogram.http.server.requests=true`를 켠다(현재 꺼져 있음).
 

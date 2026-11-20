@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -34,6 +35,9 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class BreakGlassController {
 
+	// 판정 API(DecisionController)와 같은 헤더 이름.
+	private static final String API_KEY_HEADER = "X-API-Key";
+
 	private final BreakGlassService breakGlassService;
 	private final BreakGlassUsageService breakGlassUsageService;
 
@@ -56,13 +60,14 @@ public class BreakGlassController {
 				breakGlassService.revoke(authentication, grantId, request, nowUtc())));
 	}
 
-	// GET /api/rollout/break-glass/active?projectId=...&environment=... (Client SDK 조회용, 인증 없음)
+	// GET /api/rollout/break-glass/active?environment=...[&projectId=...] (Client SDK 조회용, 헤더 X-API-Key 필수)
 	@GetMapping("/active")
 	public ResponseEntity<ApiResponse<BreakGlassActiveResponse>> active(
-			@RequestParam String projectId,
+			@RequestHeader(name = API_KEY_HEADER, required = false) String apiKey,
+			@RequestParam(required = false) String projectId,
 			@RequestParam String environment) {
 		return ResponseEntity.ok(ApiResponse.success("유효한 break-glass 조회 성공",
-				breakGlassService.getActive(projectId, environment, nowUtc())));
+				breakGlassService.getActiveForApiKey(apiKey, projectId, environment, nowUtc())));
 	}
 
 	// GET /api/rollout/break-glass?projectId=...&environment=...&limit=50 (사후 감사 이력, 조직 멤버)

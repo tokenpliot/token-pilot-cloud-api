@@ -19,6 +19,8 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tokenledgercloud.api.domain.event.entity.OperationalEvent;
 import com.tokenledgercloud.api.domain.event.repository.OperationalEventRepository;
+import com.tokenledgercloud.api.domain.ingestion.service.AuthenticatedProjectApiKey;
+import com.tokenledgercloud.api.domain.ingestion.service.ProjectApiKeyAuthenticator;
 import com.tokenledgercloud.api.domain.policy.OrganizationMembershipRepository;
 import com.tokenledgercloud.api.domain.policy.PolicyAccess;
 import com.tokenledgercloud.api.domain.project.entity.Project;
@@ -57,6 +59,7 @@ public class BreakGlassService {
 	private final OperationalEventRepository eventRepository;
 	private final PolicyAccess policyAccess;
 	private final OrganizationMembershipRepository membershipRepository;
+	private final ProjectApiKeyAuthenticator apiKeyAuthenticator;
 
 	private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -128,11 +131,25 @@ public class BreakGlassService {
 	}
 
 	/**
-	 * 지금 유효한 grant가 있는지. Client SDK가 회원 로그인 없이 확인할 수 있도록 인증을 요구하지 않는다.
-	 * 프로젝트 API Key 인증으로 좁히는 것은 SDK 연동(#18) 계약이 정해진 뒤에 한다.
+	 * Client SDK용 유효 조회. 회원 로그인 대신 판정 API와 같은 프로젝트 API 키로 인증한다(401·403은 인증기 규칙 그대로).
+	 * SDK는 자기 프로젝트 id를 모를 수 있으므로 projectId를 생략하면 키의 프로젝트를 쓴다.
+	 * projectId를 주면 키의 프로젝트와 같아야 하며, 다르면 다른 프로젝트의 존재 여부를 드러내지 않도록 404다.
+	 * 인증기가 키의 마지막 사용 시각을 기록하므로 읽기 전용 트랜잭션이 아니다.
 	 */
+	@Transactional
+	public BreakGlassActiveResponse getActiveForApiKey(String rawApiKey, String projectId, String environment,
+			LocalDateTime now) {
+		AuthenticatedProjectApiKey key = apiKeyAuthenticator.authenticate(rawApiKey, environment);
+		String targetProject = projectId == null || projectId.isBlank() ? key.projectId() : projectId;
+		if (!targetProject.equals(key.projectId())) {
+			throw new ApiException(ErrorCode.NOT_FOUND, "프로젝트를 찾을 수 없습니다.");
+		}
+		return getActive(targetProject, environment, now);
+	}
+
+	/** 지금 유효한 grant가 있는지. 인증은 호출하는 쪽(getActiveForApiKey)이 끝낸 뒤에 부른다. */
 	@Transactional(readOnly = true)
-	public BreakGlassActiveResponse getActive(String projectId, String environment, LocalDateTime now) {
+	BreakGlassActiveResponse getActive(String projectId, String environment, LocalDateTime now) {
 		Project project = projectRepository.findById(projectId)
 				.orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND, "프로젝트를 찾을 수 없습니다."));
 		requireEnvironment(projectId, environment);
