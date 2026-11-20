@@ -22,6 +22,9 @@ import lombok.RequiredArgsConstructor;
 @Service
 @RequiredArgsConstructor
 public class PolicyContextService {
+	/** Same limit as the control-plane contract's Identifier (control-plane-v1.yaml). */
+	static final int MAX_REQUEST_ID_LENGTH = 128;
+
 	private final PolicyAccess access;
 	private final ProjectRepository projects;
 	private final CustomerPolicyRepository policies;
@@ -30,9 +33,15 @@ public class PolicyContextService {
 	private final PolicyRequestContextRepository contexts;
 	private final EntityManager entityManager;
 
-	/** Server-side integration seam for #15. Never accept these snapshot IDs directly from an SDK payload. */
+	/**
+	 * Server-side integration seam for #15. Never accept these snapshot IDs directly from an SDK payload.
+	 *
+	 * @param requestFingerprint body fingerprint stored with a new binding (null when there is no request body to bind).
+	 *                           A reused context keeps the first fingerprint; the caller rejects a mismatch before evaluating.
+	 */
 	@Transactional(isolation = Isolation.READ_COMMITTED)
-	public ContextView capture(AuthenticatedProjectApiKey key, String environment, String requestId, String pricingSnapshotId) {
+	public ContextView capture(AuthenticatedProjectApiKey key, String environment, String requestId, String pricingSnapshotId,
+		String requestFingerprint) {
 		validateRequest(environment, requestId);
 		if (key == null || key.apiKeyId() == null) throw new ApiException(ErrorCode.UNAUTHORIZED);
 		if (key.environment() != null && !key.environment().isBlank() && !key.environment().equals(environment)) {
@@ -51,7 +60,7 @@ public class PolicyContextService {
 		if (pricingSnapshotId != null) prices.findById(pricingSnapshotId).orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND));
 		var context = PolicyRequestContext.capture(key.organizationId(), key.projectId(), environment, requestId,
 			current(key.organizationId(), key.projectId(), ""), current(key.organizationId(), key.projectId(), environment),
-			pricingSnapshotId, key.apiKeyId());
+			pricingSnapshotId, requestFingerprint, key.apiKeyId());
 		return view(contexts.save(context));
 	}
 
@@ -79,7 +88,7 @@ public class PolicyContextService {
 
 	private void validateRequest(String environment, String requestId) {
 		PolicyService.validateEnvironment(environment);
-		if (environment == null || requestId == null || requestId.isBlank() || requestId.length() > 100 || !requestId.equals(requestId.strip())) {
+		if (environment == null || requestId == null || requestId.isBlank() || requestId.length() > MAX_REQUEST_ID_LENGTH || !requestId.equals(requestId.strip())) {
 			throw new ApiException(ErrorCode.INVALID_INPUT);
 		}
 	}

@@ -4,7 +4,7 @@
 
 Phase 1의 `policy_snapshots`/`monthly_budget_settings` 계약을 실행 가능한 관리 API로 확장한다. #14는 정책 저장·버전·변경 감사·복구와 요청별 정책/가격 참조 보존을 담당한다. 판정 알고리즘/Advisory HTTP API(#15), Shadow 실행·예상 거부율(#16), 원자적 예약(#17), opt-in Enforce/break-glass(#18/#19)는 구현하지 않는다. 오픈소스 `tokenpilot`과 Client SDK는 수정하지 않는다. 조직→팀→사용자 계층 정책은 지원하지 않는다.
 
-#14의 완료 기준 중 **실제 요청을 당시 정책·가격 버전으로 설명하는 경로는 아직 미완료**다. 내부 capture와 조회 기능은 준비했지만 운영 요청 경로에 연결되어 있지 않다. PR은 `Refs #14`로 연결하고 이슈를 자동 종료하지 않는다. #15 연동 후 실제 HTTP 요청 → context 저장 → 정책·가격 변경 → 동일 요청의 과거 버전 조회를 검증해야 이 기준을 완료할 수 있다.
+#14의 완료 기준 중 **실제 요청을 당시 정책·가격 버전으로 설명하는 경로**: #15가 판정 API(`POST /api/control/v1/decisions`)에서 `PolicyContextService.capture`를 호출하도록 연결했다. **연동은 완료되었다.** 다만 이 기준의 end-to-end 검증, 즉 판정 API 호출 → 정책·가격 변경 → 같은 요청의 `GET .../request-context` 조회는 아직 하나의 테스트로 확인하지 않았다. 지금은 `PolicyIntegrationTest`가 `capture`를 직접 호출해 변경 뒤 불변 조회를 확인하고, `DecisionServiceIntegrationTest`는 정책 변경 뒤 같은 키로 재전송하면 처음 판정이 그대로 돌아오는 것까지만 확인한다. 그래서 이 기준은 완료로 표시하지 않고 PR은 `Refs #14`로 연결하며 이슈를 자동 종료하지 않는다. #15의 처리 결과는 문서 끝의 "#15 연동 결과"에 있다.
 
 ## 정책과 한도
 
@@ -41,7 +41,7 @@ head 변경, 불변 snapshot INSERT, 월 예산 projection 갱신을 **한 트�
 - 재시도는 최초 context를 반환한다. 현재 정책·가격으로 다시 선택하거나 덮어쓰지 않는다. #15는 요청 입력 fingerprint 충돌을 별도로 검사해야 한다.
 - 가격이 없으면 priceStatus=UNAVAILABLE, price=null로 보존한다. 무료/0원으로 변환하지 않는다.
 - `GET .../request-context`는 당시 snapshot과 규칙/가격 버전을 조회한다. 이후 새 버전 작성·비활성화·rollback에도 기존 참조는 그대로다. pricing_plans를 재조회하지 않는다.
-- **현재 기존 ingestion/Observe가 이 capture를 호출하지는 않는다.** #15가 판정 경로에 연결하며, #16은 context ID에 판정 입력(월 누적값/토큰 상한 포함), 알고리즘 버전, outcome·근거·실제 집행 결과를 추가 기록한다. #14의 context만으로 판정 결과까지 재실행했다고 주장하지 않는다. 테스트는 실제 DB에 context를 생성하고 정책/가격 변경 후 동일 요청의 불변 버전 조회를 검증한다.
+- **capture를 호출하는 곳은 #15의 판정 API(`DecisionService`)뿐이다.** 기존 ingestion/Observe는 이 capture를 호출하지 않는다. #15는 판정 기록(`decision_records`)에 판정 입력(월 누적값/토큰 상한 포함), 알고리즘 버전, outcome, 처음 응답을 저장한다. #16은 여기에 근거와 실제 집행 결과를 추가한다. #14의 context만으로 판정 결과까지 재실행했다고 주장하지 않는다. 테스트는 실제 DB에 context를 생성하고 정책/가격 변경 후 동일 요청의 불변 버전 조회를 검증한다.
 
 ## 영향 미리보기와 즉시 복구
 
@@ -66,3 +66,20 @@ head 변경, 불변 snapshot INSERT, 월 예산 projection 갱신을 **한 트�
 일괄 자동 백필은 하지 않는다. 범위별 중복/고아/음수·통화·멤버십을 사전 검사하고 고객 확인 후 import한다. 신규 관리 API는 default-org를 하드코딩하지 않고 프로젝트의 실제 조직을 사용한다. v0 summary 자체의 조직/인증 한계는 기존 상태이며 새 관리 API가 그 경로를 사용하지 않는다.
 
 마이그레이션/배포 rollback 절차: [issue-14 migration runbook](../migrations/issue-14/README.md). HTTP 요청 예시: [policy API](../api/policy-management.md).
+
+## #15 연동 결과
+
+이 문서가 #15로 넘긴 항목을 어떻게 처리했는지다. 설계는 [#15 설계 문서](issue-15-advisory-decision.md), 운영은 [판정 API 런북](../runbooks/decision-api-rollout.md)에 있다.
+
+| #14가 넘긴 항목 | #15 처리 |
+| --- | --- |
+| 프로젝트 키 인증 후 서버가 고른 불변 가격 snapshot ID를 `capture`에 넘긴다. SDK가 준 snapshot ID는 신뢰하지 않는다. | `DecisionService`가 서버의 `pricing_plans`에서 가격표를 골라 snapshot을 만들고(`PricingSnapshotService`) 그 ID를 넘긴다. SDK의 `estimatedCostUsd`·`pricingVersion`은 판정에 쓰지 않는다. |
+| 재시도는 최초 context를 반환한다. 요청 입력 fingerprint 충돌은 #15가 검사한다. | 요청 본문 지문(`decision-fp-v1`)을 `decision_records`에 저장한다. 같은 `Idempotency-Key`에 다른 지문이면 409, 같은 requestId에 다른 키가 오면 409다. 평가에는 context에 묶인 가격 snapshot을 쓴다. |
+| 가격이 없으면 `priceStatus=UNAVAILABLE`로 보존하고 0원으로 바꾸지 않는다. | 가격이 없으면 `INDETERMINATE`(`PRICING_NOT_FOUND`/`PRICING_UNAVAILABLE`)이며 context의 가격은 null이다. |
+| #15는 `rules.active`를 검사하고, 활성인 모든 범위를 함께 만족해야 한다. | `AdvisoryEvaluator`가 활성 범위만 평가하고 프로젝트·환경 정책을 모두 만족시킨다. 모두 비활성이면 `ALLOW`(`POLICY_INACTIVE`)다. |
+| 상위 트랜잭션에서 `capture`를 호출하면 `READ_COMMITTED`여야 한다. | `DecisionService`는 트랜잭션 밖에서 실행하고, 바깥 트랜잭션이 있으면 거부한다. `capture`가 잡은 프로젝트 행 잠금이 판정 기록 insert 전에 풀리게 하기 위해서다. |
+| 고처리량 판정의 성능은 #15/#17에서 측정한다. | **측정하지 않았다.** 같은 프로젝트의 판정은 `capture`의 프로젝트 행 잠금 때문에 직렬화된다. |
+| 요청 context에 판정 입력을 남긴다(#16 몫으로 적었음). | `decision_records.evaluation_input_json`에 토큰, 범위별 월 누적 지출, 정책 버전, 가격 snapshot ID, 월 경계를 저장한다. 집행 결과는 #16이다. |
+| (추가) context의 `request_id`가 계약의 requestId(128자)보다 짧았다. | V8에서 128자로 늘렸다. |
+
+**아직 남은 것**: 판정 API 호출 → 정책·가격 변경 → 같은 요청의 `GET .../request-context` 조회를 한 번에 확인하는 end-to-end 테스트. 이 테스트가 있어야 위 완료 기준을 닫을 수 있다.

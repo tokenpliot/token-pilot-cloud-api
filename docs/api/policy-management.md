@@ -43,4 +43,4 @@ PolicyVersionView는 policyId, revision(숫자), version(`<policyId>:<revision>`
 
 성공은 200. 잘못된 금액/환경/JSON/필수 파라미터는 400, 인증 없음/수집용 Project API Key는 401, 조직 내 조회 전용 역할의 쓰기는 403, 타 조직/없는 리소스는 404, stale version·이미 이관한 범위·중복 legacy 예산·비활성 프로젝트 수정은 409다. 잠금/DB 장애는 정책 거부로 표현하지 않는다.
 
-`request-context` 조회는 #15가 내부 `PolicyContextService.capture`를 호출해 context를 저장한 요청에만 가능하다. 수집 이벤트 전체를 임의로 과거 정책에 연결하지 않는다. policies의 각 rules.active가 true인 규칙들을 함께 적용한다. 가격 누락은 priceStatus=UNAVAILABLE, price=null이다.
+`request-context` 조회는 내부 `PolicyContextService.capture`를 호출해 context를 저장한 요청에만 가능하다. 지금 이를 호출하는 곳은 판정 API(`POST /api/control/v1/decisions`, #15)뿐이므로, 판정 API로 보낸 요청의 `requestId`만 조회된다. 수집 이벤트 전체를 임의로 과거 정책에 연결하지 않는다. policies의 각 rules.active가 true인 규칙들을 함께 적용한다. 가격 누락은 priceStatus=UNAVAILABLE, price=null이다.

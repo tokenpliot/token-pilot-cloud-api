@@ -109,22 +109,22 @@ class PolicyIntegrationTest {
 		var projectPolicy = policies.replace(admin, "project-a", null, replace(0, "100", true));
 		var envPolicy = policies.replace(admin, "project-a", "prod", replace(0, "30", true));
 		PricingSnapshot price1 = price("price-v1", "2");
-		var first = contexts.capture(key("prod"), "prod", "request-1", price1.getId());
+		var first = contexts.capture(key("prod"), "prod", "request-1", price1.getId(), null);
 		assertThat(first.policies()).extracting(PolicyVersionView::snapshotId).containsExactly(projectPolicy.snapshotId(), envPolicy.snapshotId());
 		policies.replace(admin, "project-a", null, replace(1, "80", true));
 		policies.replace(admin, "project-a", "prod", replace(1, "10", false));
 		PricingSnapshot price2 = price("price-v2", "5");
-		var retried = contexts.capture(key("prod"), "prod", "request-1", price2.getId());
+		var retried = contexts.capture(key("prod"), "prod", "request-1", price2.getId(), null);
 		assertThat(retried.context().getId()).isEqualTo(first.context().getId());
 		assertThat(retried.price().version()).isEqualTo("price-v1");
 		assertThat(retried.policies()).isEqualTo(first.policies());
-		var next = contexts.capture(key("prod"), "prod", "request-2", null);
+		var next = contexts.capture(key("prod"), "prod", "request-2", null, null);
 		assertThat(next.policies()).extracting(PolicyVersionView::revision).containsExactly(2L, 2L);
 		assertThat(next.policies().getLast().rules().active()).isFalse();
 		assertThat(next.priceStatus()).isEqualTo("UNAVAILABLE");
 		assertThat(next.price()).isNull();
 		assertThat(contexts.explain(admin, "project-a", "prod", "request-1").price()).isEqualTo(first.price());
-		assertThatThrownBy(() -> contexts.capture(key("prod"), "dev", "bad", price1.getId()))
+		assertThatThrownBy(() -> contexts.capture(key("prod"), "dev", "bad", price1.getId(), null))
 			.isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.FORBIDDEN));
 	}
 
@@ -178,7 +178,7 @@ class PolicyIntegrationTest {
 			.header("Authorization", bearer("outsider")).contentType(MediaType.APPLICATION_JSON)
 			.content("{\"expectedVersion\":1,\"restoreVersion\":1,\"reason\":\"foreign\"}"))
 			.andExpect(status().isNotFound());
-		contexts.capture(key("prod"), "prod", "req", null);
+		contexts.capture(key("prod"), "prod", "req", null, null);
 		mvc.perform(get("/api/policies/projects/project-a/request-context").param("environment", "prod").param("requestId", "req")
 			.header("Authorization", bearer("outsider"))).andExpect(status().isNotFound());
 	}
@@ -207,7 +207,7 @@ class PolicyIntegrationTest {
 
 	@Test
 	void contextCaptureRejectsProjectArchivedAfterItWasLoaded() {
-		assertArchivedProjectIsRejected(() -> contexts.capture(key("prod"), "prod", "request-after-archive", null), ErrorCode.FORBIDDEN);
+		assertArchivedProjectIsRejected(() -> contexts.capture(key("prod"), "prod", "request-after-archive", null, null), ErrorCode.FORBIDDEN);
 		assertThat(jdbc.queryForObject("select count(*) from policy_request_contexts", Integer.class)).isZero();
 	}
 

@@ -67,4 +67,6 @@ dependencies {
 
 tasks.named('test') {
 	useJUnitPlatform()
+	// @SpringBootTest 컨텍스트가 클래스마다 캐시에 쌓인다. Gradle 기본값(512MB)에서는 GC가 계속 돌며 전체 실행이 끝나지 않았다.
+	maxHeapSize = '1536m'
 }

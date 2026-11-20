@@ -3,6 +3,7 @@ package com.tokenledgercloud.api.domain.accounting.observe;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 
 import org.springframework.http.ResponseEntity;
@@ -45,9 +46,11 @@ public class ObserveLedgerController {
 			@RequestParam(defaultValue = "today") String period) {
 		// 기간 경계는 설계 문서에 따라 UTC 기준으로 계산한다. (JVM 기본 시간대에 따라 달라지지 않게 한다)
 		LedgerPeriod range = LedgerPeriod.resolve(period, LocalDate.now(ZoneOffset.UTC));
-		// 경과 시간의 기준 시각은 JVM 시간대다. usage_events.created_at(수신 시각)이 JVM 시간대로 저장되기 때문이다.
+		// usage_events.created_at(수신 시각)은 JVM 시간대로 저장된다. 경과 시간 기준(now)도 같은 시간대로 맞추고,
+		// 발생(UTC)→수신 지연은 서비스가 수신 시각을 UTC로 바꿔서 계산한다.
 		return ResponseEntity.ok(ApiResponse.success("수집 지연 조회 성공",
-				queryService.getIngestionLag(DEFAULT_ORGANIZATION_ID, projectId, environment, range, LocalDateTime.now())));
+				queryService.getIngestionLag(DEFAULT_ORGANIZATION_ID, projectId, environment, range,
+						LocalDateTime.now(), ZoneId.systemDefault())));
 	}
 
 	// GET /api/observe/ledger/unattributed-cost?projectId=...&environment=...&period=month
