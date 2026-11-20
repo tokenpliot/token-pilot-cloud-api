@@ -13,7 +13,7 @@ Shadow·rollout 선언·보고서 형식 [shadow-audit.md](../api/shadow-audit.m
 
 - **Enforce 집행은 고객 SDK가 한다.** 서버는 판정과 감사 기록만 남긴다. rollout 선언(`/rollout-events`)은 `CUSTOMER_DECLARATION_ONLY`이며 SDK 설정을 배포하지 않는다.
 - **break-glass는 아직 SDK가 읽지 않는다.** 서버의 발급·취소·조회·사용량 API는 있지만, Java Client SDK에 break-glass 조회 기능이 없다
-  (`tokenpliot/token-pilot-client`에 기능 요청 이슈 등록 예정). 그때까지 break-glass를 발급하면 **고객 운영자가 SDK 모드를 직접 ADVISORY/OBSERVE로 바꿔야** 실제로 우회된다.
+  (기능 요청: tokenpliot/token-pilot-client#4). 그때까지 break-glass를 발급하면 **고객 운영자가 SDK 모드를 직접 ADVISORY/OBSERVE로 바꿔야** 실제로 우회된다.
   break-glass 기록은 "누가·왜·언제까지 우회를 허가했는가"의 감사 근거로 쓴다.
 - **지표는 프로세스별·재시작 시 0부터 다시 센다.** Prometheus의 `increase()`/`rate()`로 기간 증가량을 본다.
 
