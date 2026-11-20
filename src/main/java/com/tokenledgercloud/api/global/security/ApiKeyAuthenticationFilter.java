@@ -2,6 +2,7 @@ package com.tokenledgercloud.api.global.security;
 
 import com.tokenledgercloud.api.domain.ingestion.web.IngestionPaths;
 import com.tokenledgercloud.api.domain.member.entity.Member;
+import com.tokenledgercloud.api.domain.rollout.breakglass.BreakGlassPaths;
 import com.tokenledgercloud.api.domain.apikey.service.ApiKeyService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -32,7 +33,8 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
         // These endpoints authenticate project_api_keys in their own services.
         // The member api_keys namespace must not intercept their X-API-Key header.
         // Paths are compared the way Spring MVC routes them, so /api/v2/observe/%65vents is skipped too.
-        return IngestionPaths.isProjectKeyPost(request);
+        // [이슈 #19] break-glass 유효 조회(GET)도 프로젝트 API 키를 서비스에서 확인한다.
+        return IngestionPaths.isProjectKeyPost(request) || BreakGlassPaths.isProjectKeyGet(request);
     }
 
     @Override

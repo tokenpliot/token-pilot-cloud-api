@@ -67,6 +67,16 @@ jwt:
   secret: ${JWT_SECRET}
   expiration: 86400000 # 24시간 (밀리초 단위)
 
+# --- [이슈 #19] 운영 지표 노출 (optional; 기본은 꺼짐, health만 노출) ---
+# 정책 거부·중앙 장애·provider 실패를 tokenpilot_* 지표로 나눠 센다(RolloutMetrics). 태그에 고객 id는 없다.
+# SecurityConfig가 /actuator/**를 permitAll로 열어 두었으므로 기본으로 켜지 않는다. 내부망에서만 수집할 수 있을 때
+# 배포 환경 변수로 켠다: MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE=health,prometheus
+# management:
+#   endpoints:
+#     web:
+#       exposure:
+#         include: health,prometheus
+
 # --- Ingestion limits and privacy (optional; the values below are the built-in defaults) ---
 # token-pilot:
 #   ingestion:
