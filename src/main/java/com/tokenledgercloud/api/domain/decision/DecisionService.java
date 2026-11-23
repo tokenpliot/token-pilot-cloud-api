@@ -72,6 +72,9 @@ public class DecisionService {
 	private static final String SNAPSHOT_ACTOR_TYPE = "SYSTEM";
 	private static final String SNAPSHOT_ACTOR_ID = "advisory-decision";
 	static final String RESERVED_BUDGET_EXCEEDED = "RESERVED_BUDGET_EXCEEDED";
+	static final String RESERVATION_CLOSED = "RESERVATION_CLOSED";
+	/** evaluation_input_json에 예약이 평가 결과를 바꿨을 때 남기는 키. 값은 바뀐 사유 코드다. */
+	public static final String RESERVATION_OVERRIDE_KEY = "reservationOverride";
 	private static final DateTimeFormatter BUDGET_PERIOD = DateTimeFormatter.ofPattern("yyyy-MM");
 	private static final String UNIQUE_SQL_STATE = "23505";
 	private static final int MYSQL_DUPLICATE_ENTRY = 1062;
@@ -168,12 +171,20 @@ public class DecisionService {
 		// 저장 전에 죽어도 같은 키로 다시 오면 그 예약을 이어 쓰고, 끝내 안 오면 만료 회수가 닫는다.
 		EnforcementMode effectiveMode = effectiveMode(command.clientMode());
 		DecisionResponse.Reservation reservation = null;
+		String reservationOverride = null;
 		if (needsReservation(effectiveMode, evaluation)) {
 			ReservationResult held = reserve(key, idempotencyKey, command, context, evaluation, now);
-			if (held.granted()) {
-				reservation = view(held.reservation());
+			if (!held.granted()) {
+				reservationOverride = RESERVED_BUDGET_EXCEEDED;
+				evaluation = overridden(evaluation, DecisionOutcome.DENY_BUDGET, RESERVED_BUDGET_EXCEEDED,
+					"Projected cost including unsettled reservations exceeds the remaining monthly budget.");
+			} else if (held.reservation().getState() != ReservationState.RESERVED) {
+				// 저장 전에 죽은 판정의 예약이 그 사이 만료 회수 등으로 닫혔다. 예산을 잡고 있지 않으므로 허용하면 안 된다.
+				reservationOverride = RESERVATION_CLOSED;
+				evaluation = overridden(evaluation, DecisionOutcome.INDETERMINATE, RESERVATION_CLOSED,
+					"The reservation for this request is already closed; retry with a new requestId.");
 			} else {
-				evaluation = reservedBudgetExceeded(evaluation);
+				reservation = view(held.reservation());
 			}
 		}
 
@@ -184,7 +195,7 @@ public class DecisionService {
 		DecisionRecord record = DecisionRecord.of(recordId, key.organizationId(), key.projectId(), key.apiKeyId(),
 			context.context().getId(), idempotencyKey, fingerprint, command.clientMode(), evaluation.outcome(),
 			evaluation.algorithmVersion(), LocalDateTime.ofInstant(now, ZoneOffset.UTC),
-			write(evaluationInput(command, context, price, scopes, now)), write(response));
+			write(evaluationInput(command, context, price, scopes, reservationOverride, now)), write(response));
 
 		requireNoOuterTransaction();
 		try {
@@ -366,11 +377,9 @@ public class DecisionService {
 			.orElse(null);
 	}
 
-	// 평가는 허용했지만 아직 정산되지 않은 예약까지 더하면 한도를 넘는다. 예약이 풀리면 이번 달 안에도 다시 허용될 수 있어 retryAt은 없다.
-	private static Evaluation reservedBudgetExceeded(Evaluation evaluation) {
-		return new Evaluation(DecisionOutcome.DENY_BUDGET,
-			List.of(new AdvisoryEvaluator.Reason(RESERVED_BUDGET_EXCEEDED,
-				"Projected cost including unsettled reservations exceeds the remaining monthly budget.")),
+	// 평가 결과를 예약 결과로 바꾼다. 예약이 풀리면 이번 달 안에도 다시 허용될 수 있어 retryAt은 없다.
+	private static Evaluation overridden(Evaluation evaluation, DecisionOutcome outcome, String code, String message) {
+		return new Evaluation(outcome, List.of(new AdvisoryEvaluator.Reason(code, message)),
 			evaluation.requiredCostUsd(), evaluation.remainingMonthlyBudgetUsd(), evaluation.scopes(), null,
 			evaluation.algorithmVersion());
 	}
@@ -394,8 +403,9 @@ public class DecisionService {
 	}
 
 	// 재현에 필요한 입력만 남긴다. 요청 텍스트나 metadata는 넣지 않는다.
+	// 예약 카운터는 그 순간의 동시 예약에 따라 달라 재현할 수 없으므로, 예약이 결과를 바꿨다는 사실만 남긴다(AdvisoryReplay가 본다).
 	private static Map<String, Object> evaluationInput(DecisionCommand command, ContextView context, PriceInput price,
-		List<ScopeInput> scopes, Instant now) {
+		List<ScopeInput> scopes, String reservationOverride, Instant now) {
 		Map<String, Object> input = new LinkedHashMap<>();
 		input.put("algorithmVersion", AdvisoryEvaluator.ALGORITHM_VERSION);
 		input.put("evaluatedAt", DateTimeFormatter.ISO_INSTANT.format(now));
@@ -414,6 +424,9 @@ public class DecisionService {
 			scopeRows.add(row);
 		}
 		input.put("scopes", scopeRows);
+		if (reservationOverride != null) {
+			input.put(RESERVATION_OVERRIDE_KEY, reservationOverride);
+		}
 		return input;
 	}
 

@@ -29,6 +29,8 @@ public final class AdvisoryReplay {
         try {
             JsonNode saved = JSON.readTree(record.getEvaluationInputJson());
             if (!AdvisoryEvaluator.ALGORITHM_VERSION.equals(saved.path("algorithmVersion").asText())) return unsupported(before, "UNSUPPORTED_ALGORITHM");
+            // Enforce reservations changed this outcome; held budget depended on concurrent reservations at that moment.
+            if (saved.hasNonNull(DecisionService.RESERVATION_OVERRIDE_KEY)) return unsupported(before, "RESERVATION_NOT_REPLAYABLE");
             if (!saved.path("estimatedInputTokens").canConvertToLong() || !saved.path("maxOutputTokens").canConvertToLong()
                 || !saved.path("scopes").isArray()) return unsupported(before, "REPLAY_INPUT_INCOMPLETE");
             long inputTokens = saved.path("estimatedInputTokens").longValue();

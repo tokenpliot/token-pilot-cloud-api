@@ -718,6 +718,7 @@ components:
         - `MONTHLY_SOFT_LIMIT_EXCEEDED` (`ALLOW`): 월 soft 한도를 넘음. 경고
         - `REQUEST_COST_SOFT_LIMIT_EXCEEDED` (`ALLOW`): 요청당 soft 한도를 넘음. 경고
         - `RESERVED_BUDGET_EXCEEDED` (`DENY_BUDGET`, `ENFORCE`만): 월 누적 확정 지출 + 미정산 예약 + 이번 요청 상한 비용이 월 hard 한도를 넘음. 예약이 정산·해제되면 같은 달에도 다시 허용될 수 있어 `retryAt`이 없다
+        - `RESERVATION_CLOSED` (`INDETERMINATE`, `ENFORCE`만): 판정을 저장하기 전에 서버가 멈춘 사이 이 요청의 예약이 만료 회수 등으로 이미 닫혔음. 새 `requestId`로 다시 요청한다
         - `POLICY_INACTIVE` (`ALLOW`): 적용 범위의 정책이 모두 비활성이라 평가한 규칙이 없음
         - `POLICY_NOT_CONFIGURED` (`INDETERMINATE`): 프로젝트·환경 어디에도 정책이 없음(legacy 예산만 있는 경우 포함)
         - `PRICING_NOT_FOUND` (`INDETERMINATE`): 서버에 이 provider·model의 가격표가 없음
