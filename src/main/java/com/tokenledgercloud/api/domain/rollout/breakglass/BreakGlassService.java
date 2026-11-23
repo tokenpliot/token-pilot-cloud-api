@@ -96,7 +96,7 @@ public class BreakGlassService {
 			recordEvent(grant, "WARNING", "BREAK_GLASS_ISSUED",
 					"break-glass 발급: " + grant.getEnvironment() + " 범위의 Enforce를 " + request.durationMinutes()
 							+ "분 동안 우회합니다.",
-					access.memberId(), grant.getReason(), now);
+					now);
 			RolloutMetrics.breakGlass("ISSUED");
 			return BreakGlassGrantResponse.of(grant, now);
 		} catch (DataIntegrityViolationException | OptimisticLockingFailureException exception) {
@@ -125,7 +125,7 @@ public class BreakGlassService {
 
 		recordEvent(grant, "INFO", "BREAK_GLASS_REVOKED",
 				"break-glass 취소: " + grant.getEnvironment() + " 범위의 Enforce 우회를 종료합니다.",
-				access.memberId(), request.reason(), now);
+				now);
 		RolloutMetrics.breakGlass("REVOKED");
 		return BreakGlassGrantResponse.of(grant, now);
 	}
@@ -207,12 +207,11 @@ public class BreakGlassService {
 	}
 
 	// 기존 운영 이벤트 피드(/api/events)에서도 발급·취소가 보이도록 남긴다.
-	private void recordEvent(BreakGlassGrant grant, String type, String code, String message, String actor,
-			String reason, LocalDateTime now) {
+	// 그 피드와 대시보드는 아직 인증·조직 범위 확인이 없으므로 발급자·사유는 넣지 않는다.
+	// 누가·왜는 조직 멤버만 볼 수 있는 감사 이력(GET /api/rollout/break-glass)에서 확인한다.
+	private void recordEvent(BreakGlassGrant grant, String type, String code, String message, LocalDateTime now) {
 		Map<String, Object> metadata = new LinkedHashMap<>();
 		metadata.put("grantId", grant.getId());
-		metadata.put("actor", actor);
-		metadata.put("reason", reason);
 		metadata.put("expiresAt", grant.getExpiresAt().atOffset(ZoneOffset.UTC).toString());
 		eventRepository.save(OperationalEvent.builder()
 				.organizationId(grant.getOrganizationId())

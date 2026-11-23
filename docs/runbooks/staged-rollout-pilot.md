@@ -110,7 +110,7 @@ curl -sS -X POST "$BASE_URL/api/shadow/projects/$PROJECT_ID/rollout-events" \
 | 유효 확인 | `GET /api/rollout/break-glass/active?environment=` + 헤더 `X-API-Key: $PROJECT_KEY` | 판정 API와 같은 프로젝트 API 키 인증(회원 JWT로는 401). `projectId`는 생략하면 키의 프로젝트, 주면 키의 프로젝트와 같아야 함(다르면 404). 만료 시각이 지나면 배치 없이 자동으로 무효 |
 | 사용량 확인 | `GET /api/rollout/break-glass/{grantId}/usage` | 아래 표 |
 | 취소 | `POST /api/rollout/break-glass/{grantId}/revoke` `{"reason"}` | 이미 만료·취소면 409 |
-| 사후 감사 | `GET /api/rollout/break-glass?projectId=&environment=&limit=` | 발급자·사유·발급/만료/취소 시각·취소자·취소 사유. `/api/events` 운영 이벤트 피드에도 `BREAK_GLASS_ISSUED`/`REVOKED`가 남는다 |
+| 사후 감사 | `GET /api/rollout/break-glass?projectId=&environment=&limit=` | 발급자·사유·발급/만료/취소 시각·취소자·취소 사유. `/api/events` 운영 이벤트 피드에도 `BREAK_GLASS_ISSUED`/`REVOKED`가 남지만, 그 피드는 아직 조직 범위 확인이 없어 grant id·만료 시각만 싣고 발급자·사유는 싣지 않는다 |
 
 사용량 응답 읽는 법:
 
