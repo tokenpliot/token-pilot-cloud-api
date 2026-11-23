@@ -22,11 +22,16 @@ public record DecisionResponse(
 	String requiredCostUsd,
 	String remainingMonthlyBudgetUsd,
 	String retryAt,
-	String evaluatedAt
+	String evaluatedAt,
+	Reservation reservation
 ) {
 	public record Reason(String code, String message) {
 	}
 
 	public record PolicyRef(String scope, String policyId, String policyVersion, boolean active) {
+	}
+
+	/** ENFORCE + ALLOW 판정이 잡아 둔 예산 예약. 클라이언트는 이 id로 정산한다. */
+	public record Reservation(String reservationId, ReservationState state, String reservedCostUsd, String expiresAt) {
 	}
 }

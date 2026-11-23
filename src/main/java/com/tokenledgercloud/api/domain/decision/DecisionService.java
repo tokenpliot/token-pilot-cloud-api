@@ -3,6 +3,7 @@ package com.tokenledgercloud.api.domain.decision;
 import java.math.BigDecimal;
 import java.sql.SQLException;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -15,6 +16,7 @@ import java.util.Optional;
 
 import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -31,6 +33,7 @@ import com.tokenledgercloud.api.domain.decision.AdvisoryEvaluator.Evaluation;
 import com.tokenledgercloud.api.domain.decision.AdvisoryEvaluator.PriceInput;
 import com.tokenledgercloud.api.domain.decision.AdvisoryEvaluator.Scope;
 import com.tokenledgercloud.api.domain.decision.AdvisoryEvaluator.ScopeInput;
+import com.tokenledgercloud.api.domain.decision.AdvisoryEvaluator.ScopeResult;
 import com.tokenledgercloud.api.domain.ingestion.config.ObserveIngestionProperties;
 import com.tokenledgercloud.api.domain.ingestion.service.AuthenticatedProjectApiKey;
 import com.tokenledgercloud.api.domain.ingestion.service.ProjectApiKeyAuthenticator;
@@ -39,6 +42,10 @@ import com.tokenledgercloud.api.domain.policy.PolicyContextService.ContextView;
 import com.tokenledgercloud.api.domain.policy.PolicyVersionView;
 import com.tokenledgercloud.api.domain.pricing.entity.PricingPlan;
 import com.tokenledgercloud.api.domain.pricing.repository.PricingPlanRepository;
+import com.tokenledgercloud.api.domain.reservation.ReservationCommand;
+import com.tokenledgercloud.api.domain.reservation.ReservationResult;
+import com.tokenledgercloud.api.domain.reservation.entity.BudgetReservation;
+import com.tokenledgercloud.api.domain.reservation.service.ReservationService;
 import com.tokenledgercloud.api.domain.rollout.metrics.RolloutMetrics;
 import com.tokenledgercloud.api.global.exception.ApiException;
 import com.tokenledgercloud.api.global.exception.ErrorCode;
@@ -46,14 +53,15 @@ import com.tokenledgercloud.api.global.exception.ErrorCode;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Advisory 판정 API의 처리 흐름: 키 인증 → 멱등 키 조회 → 가격·정책 snapshot 묶기(capture) → 계산 → 저장.
+ * 판정 API의 처리 흐름: 키 인증 → 멱등 키 조회 → 가격·정책 snapshot 묶기(capture) → 계산 → (ENFORCE면 예약) → 저장.
  *
- * <p><b>트랜잭션 경계.</b> 이 서비스는 트랜잭션 안에서 실행하지 않는다. 각 단계(인증, capture, 저장, 충돌 후 조회)가
+ * <p><b>트랜잭션 경계.</b> 이 서비스는 트랜잭션 안에서 실행하지 않는다. 각 단계(인증, capture, 예약, 저장, 충돌 후 조회)가
  * 자기 트랜잭션에서 커밋한다. 그래서 capture가 잡는 projects 행 잠금(SELECT ... FOR UPDATE)은 capture가 끝날 때 풀리고,
  * decision_records insert 시점에는 바깥 트랜잭션이 그 잠금을 쥐고 있지 않다. MySQL에서 insert의 FK 검사가 부모 행의
  * 공유 잠금을 기다리다 교착 나는 것을 구조로 막기 위해, 바깥 트랜잭션이 있으면 시작과 insert 직전에 거부한다.
  *
- * <p>판정은 권고다. 이 서비스는 provider 호출을 막지 않는다.
+ * <p>판정은 provider 호출을 막지 않는다. 집행은 클라이언트 설정이 한다. {@code token-pilot.decision.enforce.enabled}가
+ * 켜져 있으면 ENFORCE + ALLOW 판정이 예산을 예약해 응답에 싣고, 한도가 모자라면 DENY_BUDGET이다.
  */
 @Slf4j
 @Service
@@ -63,6 +71,8 @@ public class DecisionService {
 
 	private static final String SNAPSHOT_ACTOR_TYPE = "SYSTEM";
 	private static final String SNAPSHOT_ACTOR_ID = "advisory-decision";
+	static final String RESERVED_BUDGET_EXCEEDED = "RESERVED_BUDGET_EXCEEDED";
+	private static final DateTimeFormatter BUDGET_PERIOD = DateTimeFormatter.ofPattern("yyyy-MM");
 	private static final String UNIQUE_SQL_STATE = "23505";
 	private static final int MYSQL_DUPLICATE_ENTRY = 1062;
 	private static final ObjectMapper JSON = new ObjectMapper();
@@ -74,18 +84,28 @@ public class DecisionService {
 	private final LedgerSpendRepository spend;
 	private final ObserveIngestionProperties pricingProperties;
 	private final DecisionRecordTx recordTx;
+	private final ReservationService reservations;
+	private final boolean enforceEnabled;
+	private final Duration reservationTtl;
 	private final Clock clock;
 
 	@Autowired
 	public DecisionService(ProjectApiKeyAuthenticator authenticator, PolicyContextService contexts,
 		PricingPlanRepository pricingPlans, PricingSnapshotService pricingSnapshots, LedgerSpendRepository spend,
-		ObserveIngestionProperties pricingProperties, DecisionRecordTx recordTx) {
-		this(authenticator, contexts, pricingPlans, pricingSnapshots, spend, pricingProperties, recordTx, Clock.systemUTC());
+		ObserveIngestionProperties pricingProperties, DecisionRecordTx recordTx, ReservationService reservations,
+		@Value("${token-pilot.decision.enforce.enabled:false}") boolean enforceEnabled,
+		@Value("${token-pilot.decision.enforce.reservation-ttl:PT5M}") Duration reservationTtl) {
+		this(authenticator, contexts, pricingPlans, pricingSnapshots, spend, pricingProperties, recordTx, reservations,
+			enforceEnabled, reservationTtl, Clock.systemUTC());
 	}
 
 	DecisionService(ProjectApiKeyAuthenticator authenticator, PolicyContextService contexts,
 		PricingPlanRepository pricingPlans, PricingSnapshotService pricingSnapshots, LedgerSpendRepository spend,
-		ObserveIngestionProperties pricingProperties, DecisionRecordTx recordTx, Clock clock) {
+		ObserveIngestionProperties pricingProperties, DecisionRecordTx recordTx, ReservationService reservations,
+		boolean enforceEnabled, Duration reservationTtl, Clock clock) {
+		if (reservationTtl.isNegative() || reservationTtl.isZero()) {
+			throw new IllegalArgumentException("token-pilot.decision.enforce.reservation-ttl must be positive");
+		}
 		this.authenticator = authenticator;
 		this.contexts = contexts;
 		this.pricingPlans = pricingPlans;
@@ -93,6 +113,9 @@ public class DecisionService {
 		this.spend = spend;
 		this.pricingProperties = pricingProperties;
 		this.recordTx = recordTx;
+		this.reservations = reservations;
+		this.enforceEnabled = enforceEnabled;
+		this.reservationTtl = reservationTtl;
 		this.clock = clock;
 	}
 
@@ -141,9 +164,23 @@ public class DecisionService {
 		Evaluation evaluation = AdvisoryEvaluator.evaluate(new AdvisoryEvaluator.Input(
 			command.estimatedInputTokens(), command.maxOutputTokens(), price, scopes, now));
 
-		// 5. 저장. 이 시점에 바깥 트랜잭션(=projects 행 잠금)이 없어야 한다.
+		// 5. ENFORCE + ALLOW면 예산을 예약한다. 판정의 멱등 키로 예약하므로 재시도·동시 요청은 같은 예약을 받는다.
+		// 저장 전에 죽어도 같은 키로 다시 오면 그 예약을 이어 쓰고, 끝내 안 오면 만료 회수가 닫는다.
+		EnforcementMode effectiveMode = effectiveMode(command.clientMode());
+		DecisionResponse.Reservation reservation = null;
+		if (needsReservation(effectiveMode, evaluation)) {
+			ReservationResult held = reserve(key, idempotencyKey, command, context, evaluation, now);
+			if (held.granted()) {
+				reservation = view(held.reservation());
+			} else {
+				evaluation = reservedBudgetExceeded(evaluation);
+			}
+		}
+
+		// 6. 저장. 이 시점에 바깥 트랜잭션(=projects 행 잠금)이 없어야 한다.
 		String recordId = DecisionRecord.newId();
-		DecisionResponse response = response(DecisionRecord.decisionIdOf(recordId), command, evaluation, context.policies(), now);
+		DecisionResponse response = response(DecisionRecord.decisionIdOf(recordId), command, evaluation, effectiveMode,
+			reservation, context.policies(), now);
 		DecisionRecord record = DecisionRecord.of(recordId, key.organizationId(), key.projectId(), key.apiKeyId(),
 			context.context().getId(), idempotencyKey, fingerprint, command.clientMode(), evaluation.outcome(),
 			evaluation.algorithmVersion(), LocalDateTime.ofInstant(now, ZoneOffset.UTC),
@@ -268,7 +305,7 @@ public class DecisionService {
 	}
 
 	private DecisionResponse response(String decisionId, DecisionCommand command, Evaluation evaluation,
-		List<PolicyVersionView> policies, Instant now) {
+		EnforcementMode effectiveMode, DecisionResponse.Reservation reservation, List<PolicyVersionView> policies, Instant now) {
 		List<DecisionResponse.PolicyRef> refs = policies.stream()
 			.map(p -> new DecisionResponse.PolicyRef(p.environment() == null ? "PROJECT" : "ENVIRONMENT", p.policyId(),
 				p.version(), Boolean.TRUE.equals(p.rules().active())))
@@ -278,20 +315,70 @@ public class DecisionService {
 			decisionId,
 			command.requestId(),
 			evaluation.outcome(),
-			effectiveMode(command.clientMode()),
+			effectiveMode,
 			evaluation.reasons().stream().map(r -> new DecisionResponse.Reason(r.code(), r.message())).toList(),
 			policyVersion(policies),
 			refs,
 			usd(evaluation.requiredCostUsd()),
 			usd(evaluation.remainingMonthlyBudgetUsd()),
 			evaluation.retryAt() == null ? null : DateTimeFormatter.ISO_INSTANT.format(evaluation.retryAt()),
-			DateTimeFormatter.ISO_INSTANT.format(now)
+			DateTimeFormatter.ISO_INSTANT.format(now),
+			reservation
 		);
 	}
 
-	// #17 전까지 ENFORCE 요청도 Advisory로만 판정한다. 서버는 클라이언트 설정을 바꾸지 않는다.
-	static EnforcementMode effectiveMode(EnforcementMode clientMode) {
-		return clientMode == EnforcementMode.ENFORCE ? EnforcementMode.ADVISORY : clientMode;
+	// Enforce가 꺼져 있으면 ENFORCE 요청도 Advisory로만 판정한다. 서버는 클라이언트 설정을 바꾸지 않는다.
+	EnforcementMode effectiveMode(EnforcementMode clientMode) {
+		return clientMode == EnforcementMode.ENFORCE && !enforceEnabled ? EnforcementMode.ADVISORY : clientMode;
+	}
+
+	// 잡을 금액이 있어야 예약한다. 0원(무료 모델, 토큰 0)이나 가격 미상인 ALLOW(정책이 모두 꺼짐)는 지킬 예산이 없다.
+	private static boolean needsReservation(EnforcementMode effectiveMode, Evaluation evaluation) {
+		return effectiveMode == EnforcementMode.ENFORCE
+			&& evaluation.outcome() == DecisionOutcome.ALLOW
+			&& evaluation.requiredCostUsd() != null
+			&& evaluation.requiredCostUsd().signum() > 0;
+	}
+
+	private ReservationResult reserve(AuthenticatedProjectApiKey key, String idempotencyKey, DecisionCommand command,
+		ContextView context, Evaluation evaluation, Instant now) {
+		LocalDateTime nowUtc = LocalDateTime.ofInstant(now, ZoneOffset.UTC);
+		ReservationCommand reservation;
+		try {
+			reservation = new ReservationCommand(key.organizationId(), key.projectId(), command.environment(),
+				BUDGET_PERIOD.format(nowUtc), idempotencyKey, command.requestId(), command.provider(), command.model(),
+				command.estimatedInputTokens(), command.maxOutputTokens(), evaluation.requiredCostUsd(),
+				limitFor(evaluation, Scope.PROJECT), limitFor(evaluation, Scope.ENVIRONMENT),
+				context.context().getId(), nowUtc.plus(reservationTtl));
+		} catch (IllegalArgumentException exception) {
+			throw new ApiException(ErrorCode.INVALID_INPUT, exception.getMessage());
+		}
+		return reservations.reserve(reservation);
+	}
+
+	// 예약 카운터는 예약 경로의 금액(미정산 + 정산된 비용)만 안다. 원장 확정 지출은 평가가 이미 뺀 잔액을 한도로 넘긴다.
+	// 같은 호출이 Observe 원장에도 들어오면 정산 비용과 겹쳐 세어지므로, 실제보다 일찍 거부하는 쪽(보수적)이다.
+	private static BigDecimal limitFor(Evaluation evaluation, Scope scope) {
+		return evaluation.scopes().stream()
+			.filter(result -> result.scope() == scope)
+			.map(ScopeResult::remainingMonthlyBudgetUsd)
+			.findFirst()
+			.orElse(null);
+	}
+
+	// 평가는 허용했지만 아직 정산되지 않은 예약까지 더하면 한도를 넘는다. 예약이 풀리면 이번 달 안에도 다시 허용될 수 있어 retryAt은 없다.
+	private static Evaluation reservedBudgetExceeded(Evaluation evaluation) {
+		return new Evaluation(DecisionOutcome.DENY_BUDGET,
+			List.of(new AdvisoryEvaluator.Reason(RESERVED_BUDGET_EXCEEDED,
+				"Projected cost including unsettled reservations exceeds the remaining monthly budget.")),
+			evaluation.requiredCostUsd(), evaluation.remainingMonthlyBudgetUsd(), evaluation.scopes(), null,
+			evaluation.algorithmVersion());
+	}
+
+	private static DecisionResponse.Reservation view(BudgetReservation reservation) {
+		return new DecisionResponse.Reservation(reservation.getId(), reservation.getState(),
+			usd(reservation.getReservedCostUsd()),
+			DateTimeFormatter.ISO_INSTANT.format(reservation.getExpiresAt().toInstant(ZoneOffset.UTC)));
 	}
 
 	// 범위별 prj:/env: 버전을 프로젝트·환경 순으로 '.'로 잇는다. 정책이 없으면 none.
