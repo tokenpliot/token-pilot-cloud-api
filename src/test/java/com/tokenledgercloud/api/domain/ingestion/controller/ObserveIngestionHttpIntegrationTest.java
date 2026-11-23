@@ -223,6 +223,7 @@ class ObserveIngestionHttpIntegrationTest {
 			.satisfies(row -> {
 				assertThat(row.getEnvironment()).isEqualTo("prd");
 				assertThat(row.getAccountingStatus()).isEqualTo("QUARANTINED");
+				assertThat(row.getSettlementState()).isEqualTo("SETTLED");
 			});
 		assertThat(usage.findAll()).filteredOn(row -> row.getEventId().equals("evt-registered")).singleElement()
 			.satisfies(row -> assertThat(row.getAccountingStatus()).isEqualTo("PENDING"));
@@ -232,6 +233,7 @@ class ObserveIngestionHttpIntegrationTest {
 
 		var unattributed = ledger.getUnattributedCost("org-1", "observe-project", null, OCTOBER);
 		assertThat(unattributed.quarantinedEventCount()).isEqualTo(1);
+		assertThat(unattributed.unpricedEventCount()).isZero();
 		assertThat(unattributed.pricedActualAmountUsd()).isEqualByComparingTo("0.006");
 		// Spend only contains the attributed event.
 		assertThat(ledger.getSpendSummary("org-1", "observe-project", "prod", "2026-10").totalSpentUsd())
@@ -240,6 +242,33 @@ class ObserveIngestionHttpIntegrationTest {
 		assertThat(typoSpend.totalSpentUsd()).isEqualByComparingTo("0");
 		// ...but it is not hidden: it is counted as not reflected in spend.
 		assertThat(typoSpend.unreflectedEventCount()).isEqualTo(1);
+		var lag = ledger.getIngestionLag("org-1", "observe-project", "prd", OCTOBER, LocalDateTime.now());
+		assertThat(lag.eventCount()).isEqualTo(1);
+		assertThat(lag.unsettledCount()).isZero();
+	}
+
+	/** #41: 격리와 가격 미상은 함께 남겨, 미귀속 비용을 0달러로 오해하지 않게 한다. */
+	@Test
+	void unpricedEventForUnregisteredEnvironmentIsReportedAsUnattributed() throws Exception {
+		send(ANY_ENV_KEY, event("evt-typo-no-plan", "prd", UNPRICED_MODEL), 201);
+
+		assertThat(usage.findAll()).singleElement().satisfies(row -> {
+			assertThat(row.getAccountingStatus()).isEqualTo("QUARANTINED");
+			assertThat(row.getSettlementState()).isEqualTo("UNSETTLED");
+		});
+		assertThat(values.findAll()).singleElement().satisfies(value -> {
+			assertThat(value.getValueKind()).isEqualTo(AccountingAmount.Kind.ACTUAL);
+			assertThat(value.getPricingStatus()).isEqualTo(AccountingAmount.PricingStatus.UNPRICED);
+			assertThat(value.getAmount()).isNull();
+		});
+
+		var unattributed = ledger.getUnattributedCost("org-1", "observe-project", "prd", OCTOBER);
+		assertThat(unattributed.quarantinedEventCount()).isEqualTo(1);
+		assertThat(unattributed.unpricedEventCount()).isEqualTo(1);
+		assertThat(unattributed.pricedActualAmountUsd()).isEqualByComparingTo("0");
+		var lag = ledger.getIngestionLag("org-1", "observe-project", "prd", OCTOBER, LocalDateTime.now());
+		assertThat(lag.eventCount()).isEqualTo(1);
+		assertThat(lag.unsettledCount()).isEqualTo(1);
 	}
 
 	/** #41: environments compare case-sensitively, as policies do, so "Prod" is not the registered "prod". */
@@ -251,8 +280,9 @@ class ObserveIngestionHttpIntegrationTest {
 
 		assertThat(usage.findAll()).singleElement()
 			.satisfies(row -> assertThat(row.getAccountingStatus()).isEqualTo("QUARANTINED"));
-		assertThat(ledger.getUnattributedCost("org-1", "observe-project", "Prod", OCTOBER).quarantinedEventCount())
-			.isEqualTo(1);
+		var unattributed = ledger.getUnattributedCost("org-1", "observe-project", "Prod", OCTOBER);
+		assertThat(unattributed.quarantinedEventCount()).isEqualTo(1);
+		assertThat(unattributed.unpricedEventCount()).isZero();
 	}
 
 	private void send(String body, int expectedStatus) throws Exception {

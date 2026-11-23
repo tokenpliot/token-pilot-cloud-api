@@ -1,6 +1,6 @@
 # #41 미귀속 비용 정의와 QUARANTINED 격리 규칙
 
-#11에서 분리한 항목이다. 미귀속 비용 API(`GET /api/observe/ledger/unattributed-cost`)는 `QUARANTINED` 이벤트만 세는데, 지금은 그 상태로 바꾸는 코드가 없어 항상 0이다. 이 문서는 "미귀속"의 정의와 격리 시점을 제안하고, 그중 1단계를 구현한다.
+#11에서 분리한 항목이다. 미귀속 비용 API(`GET /api/observe/ledger/unattributed-cost`)는 `QUARANTINED` 이벤트를 센다. 이 문서는 "미귀속"의 정의와 격리 시점을 정하고, 그중 수집 시 격리하는 1단계를 구현한다.
 
 ## 미귀속의 정의
 
@@ -36,12 +36,12 @@ Observe 수집 v2(`POST /api/v2/observe/events`)에서 판정한다.
 
 | 조회 | 결과 |
 | --- | --- |
-| 미귀속 비용 `unattributed-cost` | 건수와 확정 금액 합계에 포함 |
+| 미귀속 비용 `unattributed-cost` | 격리 건수(`quarantinedEventCount`), 최신 `ACTUAL/UNPRICED` 건수(`unpricedEventCount`), 최신 `ACTUAL/PRICED` 금액 합계(`pricedActualAmountUsd`)에 포함 |
 | 지출 요약 `spend`, 판정 API의 월 지출 | 빠짐 (`LedgerSpendRepository`가 이미 `QUARANTINED`를 제외) |
 | 대조 `reconciliation` | `RECONCILIATION_REQUIRED`로 분류 (`ReconciliationClassifier`가 이미 처리) |
-| 수집 지연 `ingestion-lag` | 미정산 건수에 포함 |
+| 수집 지연 `ingestion-lag` | `eventCount`에 포함. `unsettledCount`에는 `UNSETTLED`일 때만 포함되며, 실제 사용량의 가격이 확정되어 `SETTLED`인 격리 이벤트는 빠짐 |
 
-조회 쪽은 이미 `QUARANTINED`를 다루고 있어서 바꿀 것이 없다.
+미귀속 비용은 격리 이벤트의 최신 실제 원장 값만 집계한다. 가격 미상은 확정 금액 합계에 더하지 않고 `unpricedEventCount`로 따로 세므로, 합계가 0이어도 실제 비용이 0달러라는 뜻은 아니다. 기존 가격 누락 조회와 대조 분류 기준은 바꾸지 않는다.
 
 ## 2단계 제안 (팀 결정 필요)
 
@@ -55,4 +55,4 @@ Observe 수집 v2(`POST /api/v2/observe/events`)에서 판정한다.
 | --- | --- |
 | 정의된 조건의 이벤트가 `QUARANTINED`로 기록됨 | 등록되지 않은 환경의 Observe v2 이벤트 |
 | 미귀속 비용 API에 금액이 집계됨 | 기존 `sumQuarantinedAmount`가 그대로 집계 |
-| 0달러로 위장하지 않음 | 금액은 그대로 원장에 남고, 가격 미상은 기존처럼 `UNPRICED` |
+| 0달러로 위장하지 않음 | 금액은 그대로 원장에 남고, 최신 실제 값이 `UNPRICED`인 격리 이벤트는 미귀속 비용의 `unpricedEventCount`로 따로 집계 |

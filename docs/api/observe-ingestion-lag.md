@@ -43,4 +43,15 @@ const lastReceived = new Date(data.lastReceivedAt + "Z"); // UTC로 해석
 
 ## 관련
 
-- 미귀속 비용(`/api/observe/ledger/unattributed-cost`)은 `QUARANTINED` 이벤트를 센다. 프로젝트에 등록되지 않은 환경으로 들어온 이벤트가 여기에 해당한다([#41 설계](../design/issue-41-unattributed-cost.md)). 이런 이벤트도 수집 지연의 `eventCount`와 `unsettledCount`에는 포함된다.
+- 미귀속 비용(`/api/observe/ledger/unattributed-cost`)은 `QUARANTINED` 이벤트를 센다. 프로젝트에 등록되지 않은 환경으로 들어온 이벤트가 여기에 해당한다([#41 설계](../design/issue-41-unattributed-cost.md)). 이런 이벤트도 수집 지연의 `eventCount`에는 포함되지만, `unsettledCount`에는 정산 상태가 `UNSETTLED`인 경우만 포함된다. 실제 사용량의 가격이 확정된 격리 이벤트는 `SETTLED`이므로 `unsettledCount`에서는 빠진다.
+
+미귀속 비용 응답(`data`)의 비용 필드는 다음과 같다. 조회 범위는 `projectId`, `environment`, `from`, `to`로 제공한다.
+
+| 필드 | 설명 |
+| --- | --- |
+| `quarantinedEventCount` | 조회 범위 안의 `QUARANTINED` 이벤트 수 |
+| `unpricedEventCount` | 그중 최신 실제(`ACTUAL`) 원장 값이 가격 미상(`UNPRICED`)인 이벤트 수 |
+| `pricedActualAmountUsd` | 격리 이벤트의 최신 `ACTUAL` 값 중 `PRICED`인 금액 합계. 가격 미상은 더하지 않으며, 확정 금액이 없으면 0 |
+| `currency` | 통화 (`USD`) |
+
+`unpricedEventCount`가 0보다 크면 확정 금액 합계가 0이어도 실제 비용이 0달러라는 뜻은 아니다.
