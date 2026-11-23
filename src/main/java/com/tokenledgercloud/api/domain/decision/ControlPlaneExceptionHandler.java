@@ -13,6 +13,7 @@ import org.springframework.transaction.TransactionException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import com.tokenledgercloud.api.domain.rollout.metrics.RolloutMetrics;
 import com.tokenledgercloud.api.global.exception.ApiException;
 import com.tokenledgercloud.api.global.exception.ErrorCode;
 
@@ -62,8 +63,8 @@ public class ControlPlaneExceptionHandler {
 			case FORBIDDEN -> build(HttpStatus.FORBIDDEN, "FORBIDDEN", exception.getMessage(), null, List.of());
 			case NOT_FOUND -> build(HttpStatus.NOT_FOUND, "NOT_FOUND", exception.getMessage(), null, List.of());
 			case IDEMPOTENCY_CONFLICT -> build(HttpStatus.CONFLICT, "IDEMPOTENCY_CONFLICT", exception.getMessage(), null, List.of());
-			case INGESTION_RETRY_LATER -> unavailable("Concurrent request could not be resolved. Retry the same request.",
-				RETRY_AFTER_CONFLICT_SECONDS);
+			case INGESTION_RETRY_LATER -> unavailable(RolloutMetrics.REASON_RETRY_LATER,
+				"Concurrent request could not be resolved. Retry the same request.", RETRY_AFTER_CONFLICT_SECONDS);
 			default -> {
 				// 계약에 이름이 없는 오류는 상태코드를 유지하고 기존 코드를 쓴다. 결과는 상태코드에서 정한다.
 				HttpStatus status = HttpStatus.valueOf(errorCode.getStatus().value());
@@ -76,10 +77,12 @@ public class ControlPlaneExceptionHandler {
 	@ExceptionHandler({DataAccessException.class, TransactionException.class})
 	public ResponseEntity<ControlPlaneErrorResponse> handleStoreFailure(Exception exception) {
 		log.error("Decision store unavailable", exception);
-		return unavailable("Decision store is unavailable.", RETRY_AFTER_STORE_DOWN_SECONDS);
+		return unavailable(RolloutMetrics.REASON_STORE_DOWN, "Decision store is unavailable.", RETRY_AFTER_STORE_DOWN_SECONDS);
 	}
 
-	private ResponseEntity<ControlPlaneErrorResponse> unavailable(String message, int retryAfterSeconds) {
+	// [이슈 #19] 중앙 장애는 정책 거부와 다른 지표로 센다.
+	private ResponseEntity<ControlPlaneErrorResponse> unavailable(String reason, String message, int retryAfterSeconds) {
+		RolloutMetrics.controlPlaneUnavailable(reason);
 		return build(HttpStatus.SERVICE_UNAVAILABLE, "CONTROL_PLANE_UNAVAILABLE", message, retryAfterSeconds, List.of());
 	}
 
