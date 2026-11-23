@@ -1,6 +1,6 @@
 # 판정 API 롤아웃 런북 (#15)
 
-대상: `POST /api/control/v1/decisions`. 설계와 가정은 [#15 설계 문서](../design/issue-15-advisory-decision.md), 계약은 [`control-plane-v1.yaml`](../api/control-plane-v1.yaml)에 있다.
+대상: `POST /api/control/v1/decisions`. 설계와 가정은 [#15 설계 문서](../design/issue-15-advisory-decision.md), 계약은 [`control-plane-v1.yaml`](../api/control-plane-v1.yaml)에 있다. ENFORCE 예약의 정산·만료 회수·수동 정산은 [예산 예약 운영 런북](reservation-operations.md)을 본다.
 
 > **먼저 읽을 것.** 판정 API가 꺼져 있거나 정책이 없는 범위는 SDK에서 `INDETERMINATE`로 처리된다. `ENFORCE`에 `on-indeterminate: fail-closed`를 고른 고객은 이때 **모든 호출이 막힌다.** 그래서 고객에게 `ENFORCE`를 안내하기 전에 아래 1~3단계를 끝내야 한다.
 

@@ -1,5 +1,6 @@
 package com.tokenledgercloud.api.domain.reservation.repository;
 
+import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -13,4 +14,7 @@ public interface BudgetReservationSettlementRepository extends JpaRepository<Bud
 
 	// 정산 요청의 멱등성 키로 기록을 찾는다. UNIQUE 제약이 있어서 최대 한 건이다.
 	Optional<BudgetReservationSettlement> findByProjectIdAndIdempotencyKey(String projectId, String idempotencyKey);
+
+	// 예약 하나의 정산 이력을 적용한 순서대로. (idx_reservation_settlement_reservation 인덱스)
+	List<BudgetReservationSettlement> findByReservationIdOrderByCreatedAtAscIdAsc(String reservationId);
 }

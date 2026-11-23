@@ -6,7 +6,7 @@ import java.time.Instant;
 import com.tokenledgercloud.api.global.util.HashingUtil;
 
 /**
- * 예약 하나에 대한 정산 요청. 필드는 control-plane-v1.yaml의 SettlementRequest와 같다.
+ * 예약 하나에 대한 정산 요청. 운영자 이유를 제외한 필드는 control-plane-v1.yaml의 SettlementRequest와 같다.
  *
  * @param projectId      요청한 프로젝트 키의 프로젝트. 다른 프로젝트의 예약은 없는 것으로 취급한다(404).
  * @param idempotencyKey 정산 요청의 Idempotency-Key. SDK는 {@code stl:<reservationId>:<result>}를 쓴다. 서버는 해석하지 않는다.
@@ -14,6 +14,7 @@ import com.tokenledgercloud.api.global.util.HashingUtil;
  * @param usage          COMMIT일 때 필수. 다른 종류에서는 비워야 한다.
  * @param cost           COMMIT일 때 필수. 정산 금액의 기준은 {@code totalCostUsd}이고, prompt·completion 분할은 검증하지 않는다.
  * @param occurredAt     정산 사건 시각. 재전송 비교(본문 비교)에 들어간다.
+ * @param operatorReason 운영자 정산의 감사 이유. 클라이언트·만료 회수에서는 null이다.
  */
 public record SettlementCommand(
 		String reservationId,
@@ -23,7 +24,8 @@ public record SettlementCommand(
 		SettlementAction action,
 		Usage usage,
 		Cost cost,
-		Instant occurredAt) {
+		Instant occurredAt,
+		String operatorReason) {
 
 	/** yaml UsageTokens. */
 	public record Usage(long promptTokens, long completionTokens, Long cachedPromptTokens, Long reasoningTokens) {
@@ -96,6 +98,7 @@ public record SettlementCommand(
 	/**
 	 * 같은 정산의 재전송인지 판별하는 본문 지문(SHA-256 hex). 결과가 아니라 본문 전체를 비교한다.
 	 * occurredAt까지 같아야 같은 정산이다. 금액은 소수점 6자리 문자열이라 "0.1"과 "0.100000"은 같다.
+	 * 운영자 이유가 없으면 기존 클라이언트·만료 회수의 지문을 그대로 유지한다.
 	 */
 	public String fingerprint() {
 		return HashingUtil.sha256("settlement-v2"
@@ -107,7 +110,8 @@ public record SettlementCommand(
 				+ "\n" + (cost == null ? "null" : plain(cost.promptCostUsd()) + "," + plain(cost.completionCostUsd())
 						+ "," + plain(cost.cachedPromptCostUsd()) + "," + plain(cost.reasoningCostUsd())
 						+ "," + plain(cost.totalCostUsd()))
-				+ "\n" + occurredAt);
+				+ "\n" + occurredAt
+				+ (operatorReason == null ? "" : "\noperator-reason\n" + operatorReason));
 	}
 
 	private static String plain(BigDecimal value) {

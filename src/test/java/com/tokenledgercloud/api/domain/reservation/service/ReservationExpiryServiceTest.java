@@ -116,7 +116,7 @@ class ReservationExpiryServiceTest {
 		String first = service.reserve(reserve("req-1", "0.10", "1")).reservation().getId();
 		String second = service.reserve(reserve("req-2", "0.10", "1")).reservation().getId();
 		SettlementCommand stolen = new SettlementCommand(first, PROJECT, ReservationExpiryService.KEY_PREFIX + second,
-				"req-1", SettlementAction.RELEASE, null, null, Instant.parse("2026-11-10T12:00:00Z"));
+				"req-1", SettlementAction.RELEASE, null, null, Instant.parse("2026-11-10T12:00:00Z"), null);
 
 		assertThatThrownBy(() -> service.settle(stolen))
 				.isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT));

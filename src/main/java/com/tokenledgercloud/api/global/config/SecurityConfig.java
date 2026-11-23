@@ -54,6 +54,8 @@ public class SecurityConfig {
 				// [이슈 #15] 판정 API도 프로젝트 API 키로 서비스에서 인증한다.
 				.requestMatchers(HttpMethod.POST, "/api/control/v1/decisions").permitAll()
 				.requestMatchers(HttpMethod.POST, "/api/control/v1/execution-events").permitAll()
+				// [이슈 #17] 예약 정산 API도 프로젝트 API 키로 서비스에서 인증한다.
+				.requestMatchers(HttpMethod.POST, "/api/control/v1/reservations/*/settlements").permitAll()
 				.requestMatchers("/api/dashboard/**").permitAll()
 				.requestMatchers("/dashboard").permitAll()
 				.requestMatchers("/login", "/oauth2/**", "/error").permitAll()
@@ -61,6 +63,8 @@ public class SecurityConfig {
 				// [이슈 #11] Observe 원장 조회 API는 로그인한 사용자만 호출할 수 있다. (아래 개발용 전체 허용보다 먼저 와야 한다)
 				.requestMatchers("/api/observe/**").authenticated()
 				.requestMatchers("/api/policies/**").authenticated()
+				// 예약 운영 API(#17): 조회·수동 정산 모두 로그인 필요. 프로젝트 권한은 서비스가 확인한다.
+				.requestMatchers("/api/reservations/**").authenticated()
 				.requestMatchers("/api/shadow/**").authenticated()
 				//.anyRequest().authenticated()
 				.anyRequest().permitAll() //개발용

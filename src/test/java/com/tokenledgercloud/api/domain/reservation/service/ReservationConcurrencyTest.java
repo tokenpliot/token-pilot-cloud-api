@@ -76,7 +76,7 @@ class ReservationConcurrencyTest {
 		boolean commit = action == SettlementAction.COMMIT;
 		return new SettlementCommand(id, PROJECT, "stl:" + id + ":" + action, requestId, action,
 				commit ? new Usage(900L, 400L, null, null) : null,
-				commit ? Cost.total(new BigDecimal(cost)) : null, OCCURRED);
+				commit ? Cost.total(new BigDecimal(cost)) : null, OCCURRED, null);
 	}
 
 	private BudgetReservationCounter counter() {

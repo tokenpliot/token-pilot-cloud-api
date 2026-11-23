@@ -71,7 +71,38 @@ public class ProjectApiKeyAuthenticator {
 		return markUsed(apiKey, project);
 	}
 
+	/**
+	 * For an endpoint whose body carries neither projectKey nor environment but addresses a resource of one project
+	 * (the reservation settlement API): the same key, expiry and project checks, without the environment check.
+	 * The caller must look the resource up within {@code projectId()} (404 otherwise, so other projects' resources
+	 * stay invisible) and then call {@link #requireEnvironment} with the resource's environment.
+	 */
+	@Transactional
+	public AuthenticatedProjectApiKey authenticateForProjectResource(String rawApiKey) {
+		ProjectApiKey apiKey = findKey(rawApiKey);
+		Project project = projectRepository.findByIdAndOrganizationId(apiKey.getProjectId(), apiKey.getOrganizationId())
+			.orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND, "Project was not found for this API key."));
+		validateActive(project);
+		return markUsed(apiKey, project);
+	}
+
+	/**
+	 * The environment check of the other methods, for a key from {@link #authenticateForProjectResource}: a key with an
+	 * environment may only touch resources of that environment (403). A key without one is valid for every environment.
+	 */
+	public static void requireEnvironment(AuthenticatedProjectApiKey key, String environment) {
+		if (key.environment() != null && !key.environment().isBlank() && !key.environment().equals(environment)) {
+			throw new ApiException(ErrorCode.FORBIDDEN, "Project API key is not allowed for this environment.");
+		}
+	}
+
 	private ProjectApiKey findValidKey(String rawApiKey, String environment) {
+		ProjectApiKey apiKey = findKey(rawApiKey);
+		validateEnvironment(apiKey, environment);
+		return apiKey;
+	}
+
+	private ProjectApiKey findKey(String rawApiKey) {
 		if (rawApiKey == null || rawApiKey.isBlank()) {
 			throw new ApiException(ErrorCode.UNAUTHORIZED, "Project API key is required.");
 		}
@@ -84,7 +115,6 @@ public class ProjectApiKeyAuthenticator {
 			.orElseThrow(() -> new ApiException(ErrorCode.UNAUTHORIZED, "Invalid project API key."));
 
 		validateExpiration(apiKey);
-		validateEnvironment(apiKey, environment);
 		return apiKey;
 	}
 

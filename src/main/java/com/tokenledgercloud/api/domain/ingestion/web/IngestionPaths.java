@@ -1,5 +1,7 @@
 package com.tokenledgercloud.api.domain.ingestion.web;
 
+import java.util.regex.Pattern;
+
 import org.springframework.util.StringUtils;
 import org.springframework.web.util.UrlPathHelper;
 
@@ -19,6 +21,8 @@ public final class IngestionPaths {
 	/** Control-plane decision endpoint. It also authenticates with a project API key, but is not an ingestion endpoint. */
 	public static final String DECISION_PATH = "/api/control/v1/decisions";
 	public static final String EXECUTION_EVENT_PATH = "/api/control/v1/execution-events";
+	/** Control-plane reservation settlement endpoint (#17), {@code /api/control/v1/reservations/{reservationId}/settlements}. */
+	public static final Pattern SETTLEMENT_PATH = Pattern.compile("^/api/control/v1/reservations/[^/]+/settlements$");
 
 	private static final UrlPathHelper URL_PATH_HELPER = UrlPathHelper.defaultInstance;
 
@@ -56,6 +60,12 @@ public final class IngestionPaths {
 			return true;
 		}
 		String path = normalizedPath(request);
-		return "POST".equals(request.getMethod()) && (DECISION_PATH.equals(path) || EXECUTION_EVENT_PATH.equals(path));
+		return "POST".equals(request.getMethod()) && (DECISION_PATH.equals(path) || EXECUTION_EVENT_PATH.equals(path)
+			|| isSettlementPath(path));
+	}
+
+	/** Whether a normalized path is the reservation settlement endpoint. */
+	public static boolean isSettlementPath(String normalizedPath) {
+		return SETTLEMENT_PATH.matcher(normalizedPath).matches();
 	}
 }
