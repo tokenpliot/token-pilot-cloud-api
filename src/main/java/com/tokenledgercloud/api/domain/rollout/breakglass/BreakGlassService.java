@@ -207,8 +207,8 @@ public class BreakGlassService {
 	}
 
 	// 기존 운영 이벤트 피드(/api/events)에서도 발급·취소가 보이도록 남긴다.
-	// 그 피드와 대시보드는 아직 인증·조직 범위 확인이 없으므로 발급자·사유는 넣지 않는다.
-	// 누가·왜는 조직 멤버만 볼 수 있는 감사 이력(GET /api/rollout/break-glass)에서 확인한다.
+	// 피드 응답은 metadata를 내보내지 않지만 피드 자체가 조직 범위 확인 없이 열려 있으므로,
+	// 나중에 metadata를 노출하더라도 새지 않도록 발급자·사유는 넣지 않는다. 누가·왜는 감사 이력(GET /api/rollout/break-glass)에서 본다.
 	private void recordEvent(BreakGlassGrant grant, String type, String code, String message, LocalDateTime now) {
 		Map<String, Object> metadata = new LinkedHashMap<>();
 		metadata.put("grantId", grant.getId());

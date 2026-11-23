@@ -195,7 +195,7 @@ class BreakGlassServiceTest {
 		assertThat(events).allSatisfy(event -> {
 			assertThat(event.getOrganizationId()).isEqualTo(ORG);
 			assertThat(event.getMetadataJson()).contains(grant.grantId());
-			// 운영 이벤트 피드는 조직 범위 확인이 없어 발급자·사유가 새면 안 된다.
+			// 발급자·사유는 조직 멤버 전용 감사 이력에만 남기고 공용 피드의 metadata에는 넣지 않는다.
 			assertThat(event.getMetadataJson())
 					.doesNotContain("provider 장애 대응", "복구 완료", "actor", "reason");
 		});
