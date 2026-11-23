@@ -147,7 +147,7 @@ public class SettlementRequest {
 				cost.reasoningCostUsd == null ? null : new BigDecimal(cost.reasoningCostUsd),
 				new BigDecimal(cost.totalCostUsd));
 		return new SettlementCommand(reservationId, projectId, idempotencyKey, requestId, result.action(),
-				commandUsage, commandCost, parseInstant(occurredAt));
+				commandUsage, commandCost, parseInstant(occurredAt), null);
 	}
 
 	private static Instant parseInstant(String value) {

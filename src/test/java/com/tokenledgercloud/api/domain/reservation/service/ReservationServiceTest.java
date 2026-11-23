@@ -6,11 +6,16 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.orm.jpa.EntityManagerHolder;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import com.tokenledgercloud.api.domain.decision.ReservationState;
 import com.tokenledgercloud.api.domain.reservation.ReservationCommand;
@@ -26,6 +31,9 @@ import com.tokenledgercloud.api.domain.reservation.repository.BudgetReservationR
 import com.tokenledgercloud.api.domain.reservation.repository.BudgetReservationSettlementRepository;
 import com.tokenledgercloud.api.global.exception.ApiException;
 import com.tokenledgercloud.api.global.exception.ErrorCode;
+
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.EntityManagerFactory;
 
 /**
  * 예약·정산 상태 머신의 규칙을 하나씩 확인한다. H2 + Hibernate 스키마 생성을 쓰고 Flyway는 끈다.
@@ -47,6 +55,7 @@ class ReservationServiceTest {
 	@Autowired BudgetReservationRepository reservationRepository;
 	@Autowired BudgetReservationCounterRepository counterRepository;
 	@Autowired BudgetReservationSettlementRepository settlementRepository;
+	@Autowired EntityManagerFactory entityManagerFactory;
 
 	@AfterEach
 	void cleanTables() {
@@ -81,7 +90,7 @@ class ReservationServiceTest {
 		return new SettlementCommand(reservationId, PROJECT, "stl:" + reservationId + ":" + action, requestId, action,
 				commit ? new Usage(900L, 400L, null, null) : null,
 				commit ? Cost.total(new BigDecimal(totalCost)) : null,
-				occurredAt);
+				occurredAt, null);
 	}
 
 	private BudgetReservationCounter counter(String environmentKey) {
@@ -201,7 +210,7 @@ class ReservationServiceTest {
 		SettlementCommand command = new SettlementCommand(id, PROJECT, "stl:" + id + ":COMMIT", "req-1",
 				SettlementAction.COMMIT, new Usage(900L, 400L, null, null),
 				new Cost(new BigDecimal("0.001"), new BigDecimal("0.002"), null, null, new BigDecimal("0.015")),
-				OCCURRED);
+				OCCURRED, null);
 
 		assertThat(service.settle(command).committedCostUsd()).isEqualByComparingTo("0.015");
 		assertCounters("0", "0.015");
@@ -223,6 +232,12 @@ class ReservationServiceTest {
 	}
 
 	@Test
+	void clientSettlementFingerprintRemainsCompatibleWithStoredRows() {
+		assertThat(settle("reservation-1", "req-1", SettlementAction.COMMIT, "0.15").fingerprint())
+				.isEqualTo("09a90bf56ea54e28a4ddca1f5beec6e09ded5288a66ba8c61dbe79be64b75267");
+	}
+
+	@Test
 	void sameKeyWithOnlyADifferentOccurredAtIsAnIdempotencyConflict() {
 		String id = service.reserve(reserve("req-1", "0.02", "1")).reservation().getId();
 		service.settle(settle(id, "req-1", SettlementAction.COMMIT, "0.015"));
@@ -241,6 +256,59 @@ class ReservationServiceTest {
 		// 새 키(stl:<id>:RELEASE)로 종료 상태와 다른 결과를 요구한다.
 		assertError(() -> service.settle(settle(id, "req-1", SettlementAction.RELEASE, null)), ErrorCode.CONFLICT);
 		assertCounters("0", "0.015");
+	}
+
+	@Test
+	void settlementReloadsAReservationAlreadyManagedByTheRequestPersistenceContext() throws Exception {
+		String id = service.reserve(reserve("req-1", "0.20", "1")).reservation().getId();
+		// 다른 예약의 보유액이 있어야 잘못된 두 번째 정산도 장부 검사에 가려지지 않는다.
+		service.reserve(reserve("req-2", "0.20", "1"));
+		SettlementCommand first = settle(id, "req-1", SettlementAction.COMMIT, "0.15");
+		SettlementCommand second = new SettlementCommand(id, PROJECT, "stl:" + id + ":retry", "req-1",
+				first.action(), first.usage(), first.cost(), first.occurredAt(), null);
+
+		EntityManager entityManager = entityManagerFactory.createEntityManager();
+		// OSIV처럼 트랜잭션 전 조회한 엔티티를 같은 요청의 정산까지 유지한다.
+		TransactionSynchronizationManager.bindResource(entityManagerFactory, new EntityManagerHolder(entityManager));
+		try (ExecutorService executor = Executors.newSingleThreadExecutor()) {
+			var preloaded = reservationRepository.findById(id).orElseThrow();
+			assertThat(entityManager.contains(preloaded)).isTrue();
+			assertThat(executor.submit(() -> service.settle(first)).get(10, TimeUnit.SECONDS).state())
+					.isEqualTo(ReservationState.COMMITTED);
+			assertThat(preloaded.getState()).isEqualTo(ReservationState.RESERVED);
+
+			assertError(() -> service.settle(second), ErrorCode.CONFLICT);
+		} finally {
+			TransactionSynchronizationManager.unbindResource(entityManagerFactory);
+			entityManager.close();
+		}
+
+		assertThat(settlementRepository.count()).isEqualTo(1);
+		assertCounters("0.20", "0.15");
+	}
+
+	@Test
+	void settlementReloadsCountersAlreadyManagedByTheRequestPersistenceContext() throws Exception {
+		String first = service.reserve(reserve("req-1", "0.20", "1")).reservation().getId();
+		String second = service.reserve(reserve("req-2", "0.30", "1")).reservation().getId();
+
+		EntityManager entityManager = entityManagerFactory.createEntityManager();
+		TransactionSynchronizationManager.bindResource(entityManagerFactory, new EntityManagerHolder(entityManager));
+		try (ExecutorService executor = Executors.newSingleThreadExecutor()) {
+			// 예약 경로도 정산 전에 카운터를 읽을 수 있으므로 OSIV의 이전 합계를 남긴다.
+			assertThat(entityManager.contains(counter(""))).isTrue();
+			assertThat(entityManager.contains(counter(ENV))).isTrue();
+			executor.submit(() -> service.settle(settle(second, "req-2", SettlementAction.COMMIT, "0.25")))
+					.get(10, TimeUnit.SECONDS);
+
+			service.settle(settle(first, "req-1", SettlementAction.COMMIT, "0.15"));
+		} finally {
+			TransactionSynchronizationManager.unbindResource(entityManagerFactory);
+			entityManager.close();
+		}
+
+		assertThat(settlementRepository.count()).isEqualTo(2);
+		assertCounters("0", "0.40");
 	}
 
 	@Test
@@ -296,7 +364,7 @@ class ReservationServiceTest {
 	void reservationOfAnotherProjectIsNotFound() {
 		String id = service.reserve(reserve("req-1", "0.10", "1")).reservation().getId();
 		SettlementCommand foreign = new SettlementCommand(id, "project-2", "stl:" + id + ":RELEASE", "req-1",
-				SettlementAction.RELEASE, null, null, OCCURRED);
+				SettlementAction.RELEASE, null, null, OCCURRED, null);
 
 		assertError(() -> service.settle(foreign), ErrorCode.NOT_FOUND);
 		assertCounters("0.10", "0");
@@ -309,7 +377,7 @@ class ReservationServiceTest {
 		service.settle(settle(first, "req-1", SettlementAction.RELEASE, null));
 
 		SettlementCommand reused = new SettlementCommand(second, PROJECT, "stl:" + first + ":RELEASE", "req-2",
-				SettlementAction.RELEASE, null, null, OCCURRED);
+				SettlementAction.RELEASE, null, null, OCCURRED, null);
 
 		assertError(() -> service.settle(reused), ErrorCode.IDEMPOTENCY_CONFLICT);
 		assertThat(counter(ENV).getHeldUsd()).isEqualByComparingTo("0.10");
@@ -345,9 +413,9 @@ class ReservationServiceTest {
 				.isInstanceOf(IllegalArgumentException.class);
 		// COMMIT에는 사용량과 비용이 필요하고, RELEASE에는 비용이 오면 안 된다.
 		assertThatThrownBy(() -> new SettlementCommand("r", PROJECT, "stl:r:COMMIT", "req-1", SettlementAction.COMMIT,
-				null, null, OCCURRED)).isInstanceOf(IllegalArgumentException.class);
+				null, null, OCCURRED, null)).isInstanceOf(IllegalArgumentException.class);
 		assertThatThrownBy(() -> new SettlementCommand("r", PROJECT, "stl:r:RELEASE", "req-1", SettlementAction.RELEASE,
-				null, Cost.total(BigDecimal.ONE), OCCURRED)).isInstanceOf(IllegalArgumentException.class);
+				null, Cost.total(BigDecimal.ONE), OCCURRED, null)).isInstanceOf(IllegalArgumentException.class);
 		assertThat(counterRepository.count()).isZero();
 	}
 }

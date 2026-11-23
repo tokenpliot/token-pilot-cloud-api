@@ -73,7 +73,7 @@ public class ReservationOpsService {
 					reservation.getRequestId(), request.action(),
 					commit ? new SettlementCommand.Usage(0L, 0L, null, null) : null,
 					commit ? SettlementCommand.Cost.total(request.totalCostUsd()) : null,
-					request.occurredAt());
+					request.occurredAt(), request.reason());
 		} catch (IllegalArgumentException exception) {
 			throw new ApiException(ErrorCode.INVALID_INPUT, exception.getMessage());
 		}

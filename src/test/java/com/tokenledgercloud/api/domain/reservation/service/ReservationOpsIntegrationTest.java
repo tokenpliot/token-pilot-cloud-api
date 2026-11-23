@@ -3,6 +3,7 @@ package com.tokenledgercloud.api.domain.reservation.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -19,6 +20,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.web.FilterChainProxy;
@@ -119,7 +121,7 @@ class ReservationOpsIntegrationTest {
 		boolean commit = action == SettlementAction.COMMIT;
 		reservations.settle(new SettlementCommand(id, PROJECT, "stl:" + id + ":" + action, requestId, action,
 				commit ? new SettlementCommand.Usage(900L, 400L, 0L, 0L) : null,
-				commit ? SettlementCommand.Cost.total(new BigDecimal(cost)) : null, OCCURRED));
+				commit ? SettlementCommand.Cost.total(new BigDecimal(cost)) : null, OCCURRED, null));
 	}
 
 	private static void assertError(Runnable call, ErrorCode expected) {
@@ -199,8 +201,30 @@ class ReservationOpsIntegrationTest {
 		assertThat(counter.getCommittedUsd()).isEqualByComparingTo("0.17");
 		// 같은 키에 사건 시각만 다른 본문은 다른 정산이라 409다.
 		assertError(() -> ops.reconcile(as("ops-admin"), PROJECT, id, "ops-key-0001",
-				new ReconcileRequest(SettlementAction.COMMIT, new BigDecimal("0.17"), OCCURRED.plusSeconds(1), "again")),
+				new ReconcileRequest(SettlementAction.COMMIT, new BigDecimal("0.17"), OCCURRED.plusSeconds(1), request.reason())),
 				ErrorCode.IDEMPOTENCY_CONFLICT);
+	}
+
+	@Test
+	void sameKeyWithOnlyADifferentReasonIsAnIdempotencyConflict() throws Exception {
+		String id = reserve("ops-req-1", "0.20");
+		ops.reconcile(as("ops-admin"), PROJECT, id, "ops-key-0001",
+				new ReconcileRequest(SettlementAction.COMMIT, new BigDecimal("0.17"), OCCURRED,
+						"Matched provider invoice INV-1"));
+		MockMvc mvc = MockMvcBuilders.webAppContextSetup(web).addFilters(filters).build();
+
+		// 이유만 달라진 재전송도 다른 본문이므로 감사 이유를 조용히 버리지 않는다.
+		mvc.perform(post("/api/reservations/projects/" + PROJECT + "/" + id + "/reconcile")
+				.header("Authorization", "Bearer " + jwt.createToken("ops-admin@example.test", "USER"))
+				.header("Idempotency-Key", "ops-key-0001")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+						{"action":"COMMIT","totalCostUsd":"0.17","occurredAt":"2026-11-13T09:00:00Z",
+						 "reason":"Matched provider invoice INV-2"}
+						"""))
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.code").value(ErrorCode.IDEMPOTENCY_CONFLICT.getCode()));
+		assertThat(settlementRepository.count()).isEqualTo(1);
 	}
 
 	@Test
@@ -229,7 +253,7 @@ class ReservationOpsIntegrationTest {
 		String id = reserve("ops-req-1", "0.20");
 
 		assertError(() -> reservations.settle(new SettlementCommand(id, PROJECT, "ops:pretend-operator", "ops-req-1",
-				SettlementAction.RELEASE, null, null, OCCURRED)), ErrorCode.INVALID_INPUT);
+				SettlementAction.RELEASE, null, null, OCCURRED, null)), ErrorCode.INVALID_INPUT);
 	}
 
 	@Test

@@ -113,7 +113,7 @@ class ReservationMySqlIntegrationTest {
 
 	private SettlementCommand commit(String reservationId, String requestId, String cost) {
 		return new SettlementCommand(reservationId, project, "stl:" + reservationId, requestId,
-				SettlementAction.COMMIT, new Usage(900L, 400L, null, null), Cost.total(new BigDecimal(cost)), OCCURRED);
+				SettlementAction.COMMIT, new Usage(900L, 400L, null, null), Cost.total(new BigDecimal(cost)), OCCURRED, null);
 	}
 
 	private BudgetReservationCounter counter(String environmentKey) {

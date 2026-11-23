@@ -22,6 +22,9 @@ import com.tokenledgercloud.api.domain.reservation.repository.BudgetReservationS
 import com.tokenledgercloud.api.global.exception.ApiException;
 import com.tokenledgercloud.api.global.exception.ErrorCode;
 
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
+
 import lombok.RequiredArgsConstructor;
 
 /**
@@ -41,6 +44,7 @@ public class ReservationTx {
 	private final BudgetReservationRepository reservationRepository;
 	private final BudgetReservationCounterRepository counterRepository;
 	private final BudgetReservationSettlementRepository settlementRepository;
+	private final EntityManager entityManager;
 
 	// 새 트랜잭션에서 읽는다. 동시에 들어온 다른 요청이 방금 커밋한 행도 보려면 새 트랜잭션이어야 한다.
 	@Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
@@ -124,7 +128,7 @@ public class ReservationTx {
 	 */
 	@Transactional(isolation = Isolation.READ_COMMITTED)
 	public Optional<SettlementResult> expire(String reservationId, SettlementAction actionForReserved) {
-		Optional<BudgetReservation> locked = reservationRepository.findByIdForUpdate(reservationId);
+		Optional<BudgetReservation> locked = lock(reservationId);
 		if (locked.isEmpty()) {
 			return Optional.empty();
 		}
@@ -138,7 +142,7 @@ public class ReservationTx {
 				: actionForReserved;
 		SettlementCommand command = new SettlementCommand(reservation.getId(), reservation.getProjectId(),
 				ReservationExpiryService.KEY_PREFIX + reservation.getId(), reservation.getRequestId(), action, null, null,
-				reservation.getExpiresAt().toInstant(ZoneOffset.UTC));
+				reservation.getExpiresAt().toInstant(ZoneOffset.UTC), null);
 		return Optional.of(apply(reservation, command));
 	}
 
@@ -229,14 +233,24 @@ public class ReservationTx {
 
 	// 카운터 행을 잠그고 읽는다. 예약 행이 가리키는 카운터는 반드시 있어야 한다.
 	private BudgetReservationCounter lockCounter(String counterId) {
-		return counterRepository.findByIdForUpdate(counterId)
+		BudgetReservationCounter counter = counterRepository.findByIdForUpdate(counterId)
 				.orElseThrow(() -> new IllegalStateException("reservation counter " + counterId + " is missing"));
+		// 예약 전 조회한 카운터가 OSIV에 남아 있어도 잠금 뒤의 최신 합계로 계산한다.
+		entityManager.refresh(counter, LockModeType.PESSIMISTIC_WRITE);
+		return counter;
 	}
 
 	// 예약 행을 잠그고 읽는다. 다른 프로젝트의 예약은 존재를 알려주지 않도록 404로 같게 처리한다.
 	private BudgetReservation lock(String reservationId, String projectId) {
-		return reservationRepository.findByIdForUpdate(reservationId)
+		return lock(reservationId)
 				.filter(reservation -> reservation.getProjectId().equals(projectId))
 				.orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND));
+	}
+
+	private Optional<BudgetReservation> lock(String reservationId) {
+		Optional<BudgetReservation> locked = reservationRepository.findByIdForUpdate(reservationId);
+		// 잠금 쿼리만으로는 OSIV가 보관한 엔티티가 갱신되지 않아 이미 끝난 정산을 다시 적용할 수 있다.
+		locked.ifPresent(reservation -> entityManager.refresh(reservation, LockModeType.PESSIMISTIC_WRITE));
+		return locked;
 	}
 }

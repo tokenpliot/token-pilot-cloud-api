@@ -17,7 +17,7 @@ ENFORCE + ALLOW 판정이 잡아두는 예산 예약과 그 정산을 MySQL에 �
 | 계약 | 구현 |
 | --- | --- |
 | Idempotency-Key 고유 범위는 (프로젝트, 엔드포인트), 서버는 불투명 문자열로 다룸 | 예약 `uk_reservation_idempotency (project_id, idempotency_key)`, 정산 `uk_reservation_settlement_idempotency (project_id, idempotency_key)`. 환경은 범위가 아니라 본문이라 지문에 넣는다. 키는 8~128자만 검사한다. |
-| 정산 재전송은 결과가 아니라 본문 비교, `occurredAt`까지 같아야 원래 결과 | 정산 요청마다 `budget_reservation_settlements`에 본문 지문(reservationId, requestId, result, usage, cost 전체, occurredAt)과 결과를 남긴다. 같은 키·같은 지문이면 저장된 결과를 `duplicate: true`로, 지문이 다르면 `409 IDEMPOTENCY_CONFLICT`. |
+| 정산 재전송은 결과가 아니라 본문 비교, `occurredAt`까지 같아야 원래 결과 | 정산 요청마다 `budget_reservation_settlements`에 본문 지문(reservationId, requestId, result, usage, cost 전체, occurredAt)과 결과를 남긴다. 운영자 정산만 `reason`도 지문에 추가하며, 클라이언트·만료 회수의 기존 지문은 바꾸지 않는다. 같은 키·같은 지문이면 저장된 결과를 `duplicate: true`로, 지문이 다르면 `409 IDEMPOTENCY_CONFLICT`. |
 | COMMIT 금액 기준은 `cost.totalCostUsd`, 분할이 서버 계산과 달라도 거부하지 않음 | `SettlementCommand.totalCostUsd()`만 쓴다. prompt·completion 분할은 지문에만 들어간다. |
 | 응답 `requestId`는 요청 값을 그대로 | 요청 `requestId`가 예약과 다르면 400. 응답에는 요청 값을 그대로 넣는다. |
 | 판정 API가 없으면 404 → INDETERMINATE | 정산 API도 `token-pilot.decision.enabled`일 때만 등록되어, 꺼져 있으면 404다. |
@@ -101,13 +101,13 @@ ADR 0001 §6을 그대로 따른다(`ReservationState`). 정산 종류(`Settleme
 - **COMMIT**: 청구서 등으로 확인한 실제 비용으로 확정한다. 토큰 수는 알 수 없어 0으로 기록한다.
 - **WRITE_OFF**: 끝내 확인하지 못한 예약을 예약 금액으로 확정한다. RECONCILIATION_REQUIRED에서만 가능하다(상태 전이 규칙).
 - 운영자는 RELEASE·RECONCILIATION_REQUIRED를 고를 수 없다. 그건 SDK와 만료 회수가 정한다.
-- 정산 키는 `ops:<Idempotency-Key>`다. `exp:`처럼 서버 전용이라 클라이언트 정산에서 이 접두사는 400이다. 같은 키·같은 본문의 재시도는 처음 결과를, `occurredAt`까지 같지 않으면 409를 돌려준다.
+- 정산 키는 `ops:<Idempotency-Key>`다. `exp:`처럼 서버 전용이라 클라이언트 정산에서 이 접두사는 400이다. 같은 키·같은 본문의 재시도는 처음 결과를, `occurredAt`·`reason` 중 하나만 달라도 409를 돌려준다.
 - `reason`은 필수다. 누가(회원 id) 어느 예약을 무엇으로 왜 닫았는지 감사 로그(INFO)에 남긴다. DB에 감사 컬럼을 두는 것은 후속 과제다.
 
 ## 동시성
 
 - **예약**: 프로젝트 카운터 → 환경 카운터를 `SELECT ... FOR UPDATE`로 잠그고 두 한도를 모두 확인한 뒤 둘 다에 금액을 잡고 예약 행을 넣는다. 한 트랜잭션이라 같은 멱등성 키가 동시에 와서 늦은 쪽이 UNIQUE 오류를 내면 잡은 금액도 함께 되돌아간다. 한도가 모자라면 예외가 아니라 `granted=false`(판정 API에서 `DENY_BUDGET`)다.
-- **정산**: 예약 행 → 프로젝트 카운터 → 환경 카운터 순으로 잠그고, 상태·카운터·정산 기록을 한 트랜잭션에서 바꾼다. 같은 정산이 동시에 와도 한 번만 반영된다.
+- **정산**: 예약 행 → 프로젝트 카운터 → 환경 카운터 순으로 잠그고, 상태·카운터·정산 기록을 한 트랜잭션에서 바꾼다. 잠금 쿼리는 OSIV에 이미 올라온 엔티티를 재사용하므로 예약·카운터를 잠근 뒤 `refresh`해 최신 상태와 합계로 계산한다. 만료 회수도 같은 예약 잠금 경로를 쓴다. 같은 정산이 동시에 와도 한 번만 반영된다.
 - **잠금 순서**: 예약은 카운터만(프로젝트 → 환경), 정산은 예약 → 프로젝트 → 환경. 순환 대기가 없다. 데드락·락 타임아웃은 재시도 가능한 `503 INGESTION-503`.
 - 쓰기 트랜잭션은 #14와 같이 `READ_COMMITTED`다. 잠금을 기다린 뒤 읽는 값이 방금 커밋된 최신 값이어야 하기 때문이다.
 - `ReservationConcurrencyTest`는 H2 기반이다. 실제 UNIQUE 제약과 행 잠금은 걸리지만 MySQL 잠금 거동 자체는 아니다.
