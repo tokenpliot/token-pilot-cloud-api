@@ -221,7 +221,32 @@ class ObserveLedgerQueryServiceTest {
 
 		// 격리 이벤트는 2건이고, 금액은 최신 개정본 4달러만 더해진다. (3 + 4 = 7이 되면 이중 계산이다)
 		assertThat(response.quarantinedEventCount()).isEqualTo(2);
+		assertThat(response.unpricedEventCount()).isEqualTo(1);
 		assertThat(response.pricedActualAmountUsd()).isEqualByComparingTo("4.000000");
+	}
+
+	@Test
+	void unattributedUnpricedCountUsesOnlyTheLatestActualRevision() {
+		// 가격 확정 전의 미상 개정본은 다시 세지 않는다.
+		UsageLog resolved = event(projectId, "resolved", "QUARANTINED", "SETTLED", "openai", "gpt-a", 10);
+		actual(resolved, 1, unpriced());
+		actual(resolved, 2, priced("1.000000"));
+		// 최신 실제 값이 미상이면, 옛 확정 금액이나 여러 미상 개정본에 영향받지 않는다.
+		UsageLog unresolved = event(projectId, "unresolved", "QUARANTINED", "UNSETTLED", "openai", "gpt-a", 10);
+		actual(unresolved, 1, priced("2.000000"));
+		actual(unresolved, 2, unpriced());
+		actual(unresolved, 3, unpriced());
+		// 더 큰 추정 개정 번호가 있어도 실제 값의 최신 개정만 고른다.
+		valueRepository.saveAndFlush(UsageAccountingValue.of(unresolved.getId(), 4,
+				new AccountingAmount(AccountingAmount.Kind.ESTIMATED, AccountingAmount.PricingStatus.PRICED,
+						new BigDecimal("9.000000"), "USD", AccountingAmount.Source.SERVER_CATALOG),
+				"snap-1", null, "TEST", "SYSTEM", "test"));
+
+		var response = service.getUnattributedCost(ORG, projectId, null, PERIOD);
+
+		assertThat(response.quarantinedEventCount()).isEqualTo(2);
+		assertThat(response.unpricedEventCount()).isEqualTo(1);
+		assertThat(response.pricedActualAmountUsd()).isEqualByComparingTo("1.000000");
 	}
 
 	@Test
@@ -229,6 +254,7 @@ class ObserveLedgerQueryServiceTest {
 		// 격리 이벤트가 없으면 금액은 null이 아니라 0이어야 한다.
 		var response = service.getUnattributedCost(ORG, projectId, null, PERIOD);
 		assertThat(response.quarantinedEventCount()).isZero();
+		assertThat(response.unpricedEventCount()).isZero();
 		assertThat(response.pricedActualAmountUsd()).isEqualByComparingTo("0");
 	}
 

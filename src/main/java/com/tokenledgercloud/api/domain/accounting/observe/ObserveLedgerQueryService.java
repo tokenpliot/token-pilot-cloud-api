@@ -104,7 +104,7 @@ public class ObserveLedgerQueryService {
 		return local == null ? null : local.atZone(zone).withZoneSameInstant(ZoneOffset.UTC).toLocalDateTime();
 	}
 
-	/** 미귀속 비용: 격리된 이벤트 수와, 그 이벤트의 최신 실제 확정 금액 합계를 돌려준다. */
+	/** 미귀속 비용: 격리된 이벤트 수, 가격 미상 건수와 최신 실제 확정 금액 합계를 돌려준다. */
 	@Transactional(readOnly = true)
 	public UnattributedCostResponse getUnattributedCost(String organizationId, String projectId, String environment,
 			LedgerPeriod period) {
@@ -113,12 +113,16 @@ public class ObserveLedgerQueryService {
 		// 격리 상태 이벤트 수.
 		long count = queryRepository.countByAccountingStatus(organizationId, projectId, env,
 				period.from(), period.to(), AccountingStatus.QUARANTINED.name());
+		// 가격 미상은 확정 금액과 별도로 세어 0달러로 보이지 않게 한다.
+		long unpricedCount = queryRepository.countQuarantinedUnpriced(organizationId, projectId, env,
+				period.from(), period.to(),
+				AccountingAmount.Kind.ACTUAL, AccountingAmount.PricingStatus.UNPRICED);
 		// 격리 이벤트의 최신 ACTUAL/PRICED 금액 합계. 대상이 없으면 null이므로 0으로 바꾼다.
 		BigDecimal amount = queryRepository.sumQuarantinedAmount(organizationId, projectId, env,
 				period.from(), period.to(),
 				AccountingAmount.Kind.ACTUAL, AccountingAmount.PricingStatus.PRICED);
 		return new UnattributedCostResponse(projectId, env, period.from(), period.to(),
-				count, amount == null ? BigDecimal.ZERO : amount, "USD");
+				count, unpricedCount, amount == null ? BigDecimal.ZERO : amount, "USD");
 	}
 
 	/** 가격 누락: 최신 실제 값이 UNPRICED인 이벤트를 공급자/모델별로 돌려준다. */

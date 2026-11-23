@@ -210,8 +210,87 @@ class ObserveIngestionHttpIntegrationTest {
 		}
 	}
 
+	/**
+	 * #41: a key without an environment restriction can send any environment string. A typo ("prd") must not silently
+	 * become spend of no budget scope: the event is stored, kept out of spend and reported as unattributed cost.
+	 */
+	@Test
+	void eventForUnregisteredEnvironmentIsQuarantinedAndReportedAsUnattributed() throws Exception {
+		send(ANY_ENV_KEY, event("evt-typo", "prd", PRICED_MODEL), 201);
+		send(ANY_ENV_KEY, event("evt-registered", "prod", PRICED_MODEL), 201);
+
+		assertThat(usage.findAll()).filteredOn(row -> row.getEventId().equals("evt-typo")).singleElement()
+			.satisfies(row -> {
+				assertThat(row.getEnvironment()).isEqualTo("prd");
+				assertThat(row.getAccountingStatus()).isEqualTo("QUARANTINED");
+				assertThat(row.getSettlementState()).isEqualTo("SETTLED");
+			});
+		assertThat(usage.findAll()).filteredOn(row -> row.getEventId().equals("evt-registered")).singleElement()
+			.satisfies(row -> assertThat(row.getAccountingStatus()).isEqualTo("PENDING"));
+		// The cost is kept in the ledger, not dropped or turned into 0 USD.
+		assertThat(values.findAll()).hasSize(2)
+			.allSatisfy(value -> assertThat(value.getAmount()).isEqualByComparingTo("0.006"));
+
+		var unattributed = ledger.getUnattributedCost("org-1", "observe-project", null, OCTOBER);
+		assertThat(unattributed.quarantinedEventCount()).isEqualTo(1);
+		assertThat(unattributed.unpricedEventCount()).isZero();
+		assertThat(unattributed.pricedActualAmountUsd()).isEqualByComparingTo("0.006");
+		// Spend only contains the attributed event.
+		assertThat(ledger.getSpendSummary("org-1", "observe-project", "prod", "2026-10").totalSpentUsd())
+			.isEqualByComparingTo("0.006");
+		var typoSpend = ledger.getSpendSummary("org-1", "observe-project", "prd", "2026-10");
+		assertThat(typoSpend.totalSpentUsd()).isEqualByComparingTo("0");
+		// ...but it is not hidden: it is counted as not reflected in spend.
+		assertThat(typoSpend.unreflectedEventCount()).isEqualTo(1);
+		var lag = ledger.getIngestionLag("org-1", "observe-project", "prd", OCTOBER, LocalDateTime.now());
+		assertThat(lag.eventCount()).isEqualTo(1);
+		assertThat(lag.unsettledCount()).isZero();
+	}
+
+	/** #41: 격리와 가격 미상은 함께 남겨, 미귀속 비용을 0달러로 오해하지 않게 한다. */
+	@Test
+	void unpricedEventForUnregisteredEnvironmentIsReportedAsUnattributed() throws Exception {
+		send(ANY_ENV_KEY, event("evt-typo-no-plan", "prd", UNPRICED_MODEL), 201);
+
+		assertThat(usage.findAll()).singleElement().satisfies(row -> {
+			assertThat(row.getAccountingStatus()).isEqualTo("QUARANTINED");
+			assertThat(row.getSettlementState()).isEqualTo("UNSETTLED");
+		});
+		assertThat(values.findAll()).singleElement().satisfies(value -> {
+			assertThat(value.getValueKind()).isEqualTo(AccountingAmount.Kind.ACTUAL);
+			assertThat(value.getPricingStatus()).isEqualTo(AccountingAmount.PricingStatus.UNPRICED);
+			assertThat(value.getAmount()).isNull();
+		});
+
+		var unattributed = ledger.getUnattributedCost("org-1", "observe-project", "prd", OCTOBER);
+		assertThat(unattributed.quarantinedEventCount()).isEqualTo(1);
+		assertThat(unattributed.unpricedEventCount()).isEqualTo(1);
+		assertThat(unattributed.pricedActualAmountUsd()).isEqualByComparingTo("0");
+		var lag = ledger.getIngestionLag("org-1", "observe-project", "prd", OCTOBER, LocalDateTime.now());
+		assertThat(lag.eventCount()).isEqualTo(1);
+		assertThat(lag.unsettledCount()).isEqualTo(1);
+	}
+
+	/** #41: environments compare case-sensitively, as policies do, so "Prod" is not the registered "prod". */
+	@Test
+	void environmentWithDifferentCaseIsQuarantined() throws Exception {
+		send(ANY_ENV_KEY, event("evt-case", "Prod", PRICED_MODEL), 201);
+		// A resend returns the first record and stays quarantined.
+		send(ANY_ENV_KEY, event("evt-case", "Prod", PRICED_MODEL), 200);
+
+		assertThat(usage.findAll()).singleElement()
+			.satisfies(row -> assertThat(row.getAccountingStatus()).isEqualTo("QUARANTINED"));
+		var unattributed = ledger.getUnattributedCost("org-1", "observe-project", "Prod", OCTOBER);
+		assertThat(unattributed.quarantinedEventCount()).isEqualTo(1);
+		assertThat(unattributed.unpricedEventCount()).isZero();
+	}
+
 	private void send(String body, int expectedStatus) throws Exception {
-		mvc.perform(post("/api/v2/observe/events").header("X-API-Key", PROD_KEY)
+		send(PROD_KEY, body, expectedStatus);
+	}
+
+	private void send(String apiKey, String body, int expectedStatus) throws Exception {
+		mvc.perform(post("/api/v2/observe/events").header("X-API-Key", apiKey)
 				.contentType(MediaType.APPLICATION_JSON).content(body))
 			.andExpect(status().is(expectedStatus));
 	}

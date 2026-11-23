@@ -130,6 +130,30 @@ public interface ObserveLedgerQueryRepository extends Repository<UsageLog, Strin
 			@Param("kind") AccountingAmount.Kind kind,
 			@Param("pricingStatus") AccountingAmount.PricingStatus pricingStatus);
 
+	// 가격 미상인 격리 비용을 0달러로 숨기지 않도록 최신 ACTUAL/UNPRICED 이벤트를 따로 센다.
+	@Query("""
+		select count(u)
+		from UsageAccountingValue v, UsageLog u
+		where v.usageEventId = u.id
+		  and u.organizationId = :organizationId
+		  and u.projectId = :projectId
+		  and (:environment is null or u.environment = :environment)
+		  and u.occurredAt >= :from
+		  and u.occurredAt < :to
+		  and u.accountingStatus = 'QUARANTINED'
+		  and v.valueKind = :kind
+		  and v.pricingStatus = :pricingStatus
+		  and v.revision = (select max(v2.revision) from UsageAccountingValue v2
+				where v2.usageEventId = v.usageEventId and v2.valueKind = v.valueKind)
+		""")
+	long countQuarantinedUnpriced(@Param("organizationId") String organizationId,
+			@Param("projectId") String projectId,
+			@Param("environment") String environment,
+			@Param("from") LocalDateTime from,
+			@Param("to") LocalDateTime to,
+			@Param("kind") AccountingAmount.Kind kind,
+			@Param("pricingStatus") AccountingAmount.PricingStatus pricingStatus);
+
 	// 최신 실제(ACTUAL) 개정본이 가격 미상(UNPRICED)인 이벤트를 공급자/모델별로 센다.
 	// /reconciliation의 UNPRICED 건수와 같은 기준이 되도록 분류기와 같은 조건(기존 행, 격리, 정산 완료, 사용량 미상 제외)을 건다.
 	@Query("""

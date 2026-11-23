@@ -7,6 +7,7 @@ import java.util.Optional;
 import org.springframework.stereotype.Service;
 
 import com.tokenledgercloud.api.domain.accounting.AccountingAmount;
+import com.tokenledgercloud.api.domain.accounting.AccountingStatus;
 import com.tokenledgercloud.api.domain.accounting.CallStatus;
 import com.tokenledgercloud.api.domain.accounting.ServerPriceCalculator;
 import com.tokenledgercloud.api.domain.accounting.UsageTokens;
@@ -53,6 +54,8 @@ public class ObserveIngestionService {
 	private final ObserveIngestionProperties properties;
 	// metadata에서 금지 키를 빼고 저장용 JSON으로 바꾸는 빈. v1 수집과 같은 것을 쓴다.
 	private final IngestionMetadataSerializer metadataSerializer;
+	// 등록되지 않은 환경의 이벤트를 미귀속(QUARANTINED)으로 판정하는 빈. (#41)
+	private final ObserveEventAttribution attribution;
 
 	/** 이벤트를 수집한다. */
 	public ObserveEventResponse collect(String apiKey, ObserveEventRequest request) {
@@ -102,8 +105,13 @@ public class ObserveIngestionService {
 			throw new ApiException(ErrorCode.INVALID_INPUT, exception.getMessage());
 		}
 
-		// 6. 원장에 기록한다. 동시에 들어온 같은 이벤트는 writer가 중복으로 처리한다.
-		AccountingLedgerResult result = ledgerWriter.record(command);
+		// 6. 프로젝트에 등록되지 않은 환경이면 거절하지 않고 미귀속(QUARANTINED)으로 기록한다. (#41)
+		//    금액은 그대로 원장에 남지만 지출 합계에서는 빠지고 미귀속 비용 API에 따로 집계된다.
+		AccountingStatus accountingStatus = attribution.initialStatus(
+				auth.organizationId(), auth.projectId(), environment);
+
+		// 7. 원장에 기록한다. 동시에 들어온 같은 이벤트는 writer가 중복으로 처리한다.
+		AccountingLedgerResult result = ledgerWriter.record(command, accountingStatus);
 		return new ObserveEventResponse(request.eventId(), result.usageEventId(), result.duplicate());
 	}
 

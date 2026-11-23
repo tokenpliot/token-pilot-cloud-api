@@ -12,6 +12,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 import com.tokenledgercloud.api.domain.accounting.AccountingAmount;
+import com.tokenledgercloud.api.domain.accounting.AccountingStatus;
 import com.tokenledgercloud.api.domain.accounting.CallStatus;
 import com.tokenledgercloud.api.domain.accounting.TokenSemantics;
 import com.tokenledgercloud.api.domain.accounting.entity.UsageAccountingValue;
@@ -191,6 +192,32 @@ class AccountingLedgerWriterTest {
 		assertThatThrownBy(() -> writer.record(build("ev-req-2", "shared-request", FINGERPRINT_A, "observe-v1",
 				TokenSemantics.INCLUSIVE_V1, CallStatus.SUCCEEDED, pricedActual())))
 				.isInstanceOf(ApiException.class);
+	}
+
+	@Test
+	void eventCanStartQuarantinedWithItsLedgerValueKept() {
+		// 귀속이 불확실한 이벤트(#41)도 금액과 정산 상태는 그대로 남고 회계 상태만 QUARANTINED다.
+		var result = writer.record(command("ev-quarantined", FINGERPRINT_A, CallStatus.SUCCEEDED, pricedActual()),
+				AccountingStatus.QUARANTINED);
+		UsageLog event = usageLogRepository.findById(result.usageEventId()).orElseThrow();
+		assertThat(event.getAccountingStatus()).isEqualTo("QUARANTINED");
+		assertThat(event.getSettlementState()).isEqualTo("SETTLED");
+		assertThat(valuesOf(result.usageEventId())).singleElement()
+				.satisfies(value -> assertThat(value.getAmount()).isEqualByComparingTo("0.005150"));
+		// 재전송은 상태를 다시 정하지 않고 처음 기록을 돌려준다.
+		var resent = writer.record(command("ev-quarantined", FINGERPRINT_A, CallStatus.SUCCEEDED, pricedActual()));
+		assertThat(resent.duplicate()).isTrue();
+		assertThat(resent.usageEventId()).isEqualTo(result.usageEventId());
+	}
+
+	@Test
+	void newEventsCannotStartLegacyOrVerified() {
+		assertThatThrownBy(() -> writer.record(command("ev-verified", FINGERPRINT_A, CallStatus.SUCCEEDED,
+				pricedActual()), AccountingStatus.VERIFIED)).isInstanceOf(IllegalArgumentException.class);
+		assertThatThrownBy(() -> writer.record(command("ev-legacy", FINGERPRINT_A, CallStatus.SUCCEEDED,
+				pricedActual()), AccountingStatus.LEGACY_UNVERIFIED)).isInstanceOf(IllegalArgumentException.class);
+		assertThat(usageLogRepository.findByProjectIdAndEnvironmentAndEventId("project-1", "prod", "ev-verified"))
+				.isEmpty();
 	}
 
 	@Test
