@@ -32,7 +32,9 @@ paths:
         이때 `on-indeterminate: fail-closed`를 고른 범위는 모든 호출이 막히므로, 고객에게 `ENFORCE`를 안내하기 전에 이 API를 켠다.
         정책이 없는 범위(legacy 예산만 있는 범위 포함)도 `INDETERMINATE`이므로 fail-closed면 모든 호출이 막힌다. `ENFORCE`를 안내하기 전에 정책을 만들거나 import한다.
 
-        `#17`(예약) 전까지 서버는 `clientMode: ENFORCE` 요청도 받지만 Advisory로만 판정한다. `reservation`을 발급하지 않고 `effectiveMode`는 `ADVISORY`다.
+        `ENFORCE` 예약은 서버 설정 `token-pilot.decision.enforce.enabled=true`일 때만 발급한다. 꺼져 있으면 `clientMode: ENFORCE` 요청도 Advisory로만 판정하고 `reservation` 없이 `effectiveMode`는 `ADVISORY`다.
+        켜져 있으면 `ENFORCE` + `ALLOW`이고 최대 예상 비용이 0보다 클 때 그 금액을 예약해 `reservation`에 싣고 `effectiveMode`는 `ENFORCE`다.
+        이미 잡힌 미정산 예약까지 더해 월 한도를 넘으면 `DENY_BUDGET`(`RESERVED_BUDGET_EXCEEDED`)이다. 예약은 판정의 `Idempotency-Key`로 잡으므로 같은 판정의 재전송은 같은 예약을 받는다.
 
         같은 프로젝트·환경에서 같은 `requestId`가 다른 `Idempotency-Key`나 다른 본문으로 오면 `409` `IDEMPOTENCY_CONFLICT`다.
         `requestId` 하나에는 판정이 하나만 있고, 그 판정은 처음 묶은 정책·가격 snapshot을 유지한다.
@@ -715,6 +717,8 @@ components:
         - `REQUEST_COST_LIMIT_EXCEEDED` (`DENY_BUDGET`): 이번 요청 상한 비용이 요청당 hard 한도를 넘음
         - `MONTHLY_SOFT_LIMIT_EXCEEDED` (`ALLOW`): 월 soft 한도를 넘음. 경고
         - `REQUEST_COST_SOFT_LIMIT_EXCEEDED` (`ALLOW`): 요청당 soft 한도를 넘음. 경고
+        - `RESERVED_BUDGET_EXCEEDED` (`DENY_BUDGET`, `ENFORCE`만): 월 누적 확정 지출 + 미정산 예약 + 이번 요청 상한 비용이 월 hard 한도를 넘음. 예약이 정산·해제되면 같은 달에도 다시 허용될 수 있어 `retryAt`이 없다
+        - `RESERVATION_CLOSED` (`INDETERMINATE`, `ENFORCE`만): 판정을 저장하기 전에 서버가 멈춘 사이 이 요청의 예약이 만료 회수 등으로 이미 닫혔음. 새 `requestId`로 다시 요청한다
         - `POLICY_INACTIVE` (`ALLOW`): 적용 범위의 정책이 모두 비활성이라 평가한 규칙이 없음
         - `POLICY_NOT_CONFIGURED` (`INDETERMINATE`): 프로젝트·환경 어디에도 정책이 없음(legacy 예산만 있는 경우 포함)
         - `PRICING_NOT_FOUND` (`INDETERMINATE`): 서버에 이 provider·model의 가격표가 없음

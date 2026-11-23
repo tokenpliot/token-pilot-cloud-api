@@ -38,7 +38,7 @@ V9 적용 후 `token-pilot.shadow.enabled=true`로 활성화한다. 기본값은
 
 - 표본은 해당 UTC 월 `[월초, 다음 달 월초)`에 평가되었고 **선택한 baseline snapshot을 참조한 판정**이다. 전체 사용량이나 다른 정책 버전의 트래픽이 섞이지 않는다. 최대 2,000건을 넘으면 400으로 전체 실행을 거절한다. 조용히 잘라낸 보고서는 저장하지 않는다.
 - `AdvisoryReplay`는 #15의 `AdvisoryEvaluator`를 그대로 호출한다. 최초 토큰 상한, 프로젝트·환경별 월 지출, 당시 가격 snapshot, 두 범위의 정책을 재사용하고 선택한 범위의 규칙만 후보로 바꾼다. 다른 범위의 현재 정책을 조회해 섞지 않는다.
-- baseline 결과가 원본 응답과 일치해야 후보를 평가한다. 알고리즘 미지원·입력 누락·baseline 불일치는 후보 `INDETERMINATE`와 사유로 남긴다. #15는 비활성 정책의 월 지출을 조회하지 않으므로 비활성→활성 후보도 `INACTIVE_SCOPE_SPEND_NOT_CAPTURED`로 남긴다.
+- baseline 결과가 원본 응답과 일치해야 후보를 평가한다. 알고리즘 미지원·입력 누락·baseline 불일치는 후보 `INDETERMINATE`와 사유로 남긴다. #15는 비활성 정책의 월 지출을 조회하지 않으므로 비활성→활성 후보도 `INACTIVE_SCOPE_SPEND_NOT_CAPTURED`로 남긴다. Enforce 예약이 결과를 바꾼 판정(`RESERVED_BUDGET_EXCEEDED`, `RESERVATION_CLOSED`)은 그 순간의 미정산 예약에 달려 재현할 수 없으므로 `RESERVATION_NOT_REPLAYABLE`로 남긴다.
 - 금액은 서버 가격표를 쓴 USD 소수 문자열이며 actual 청구액이 아닌 **판정 당시 예상 상한**이다. cache/reasoning 중복 합산 없이 #15의 상한 요율 계산을 재사용한다. SDK 제공 비용으로 재가격하지 않는다.
 - 후보 버전은 `shadow:{runId}`이다. 실제 policy head, 예산 projection, 과거 판정·가격 snapshot을 변경하지 않는다. 각 sample에는 decisionId/requestId, 환경, 원본 알고리즘, 가격 snapshot ID/version/checksum, 정책 snapshot·규칙, evaluationInputJson을 보존한다.
 - `changed`는 outcome 변경 여부다. 세부 reason·금액 변화는 before/after에서 비교한다. 거부율은 `denied / evaluated`(소수 6자리)이며 INDETERMINATE는 분모에서 제외한다. 분모가 0이면 null이다. `newlyDenied`는 ALLOW→정책 거부다.

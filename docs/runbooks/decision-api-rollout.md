@@ -12,6 +12,7 @@
 | 기본값 | **꺼짐.** 꺼져 있으면 컨트롤러가 등록되지 않아 `404`(`data: null`, `data.outcome` 없음)다. |
 | 필요한 선행 설정 | `token-pilot.observe.ingestion.rate-unit-tokens`가 0보다 커야 한다. 0이면 가격을 계산할 수 없어 모든 판정이 `INDETERMINATE`(`PRICING_UNAVAILABLE`)다. 판정과 Observe가 같은 가격 단위를 쓴다. |
 | 필요한 데이터 | 해당 provider·model의 `pricing_plans`(유효 기간 안, 통화 USD), 프로젝트(또는 환경) 정책 |
+| Enforce 예약 | `token-pilot.decision.enforce.enabled=true`(기본 꺼짐)여야 `ENFORCE` + `ALLOW` 판정이 예산을 예약하고 `effectiveMode: ENFORCE`가 된다. 예약 유효 시간은 `token-pilot.decision.enforce.reservation-ttl`(기본 `PT5M`). 켜기 전에 `token-pilot.reservation.expiry.enabled=true`로 만료 회수를 켠다. 꺼져 있으면 정산이 안 온 예약이 한도를 계속 잡는다. 정산·회수는 [예산 예약 운영 런북](reservation-operations.md). |
 
 배포 전에 `V8__decision_records.sql`이 Flyway로 적용된다. **MySQL에서 이 SQL을 아직 실행해 보지 못했다.** 운영 배포 전에 복제 DB에서 리허설하고 백업한다(설계 문서의 "검증 한계" 참고).
 
@@ -54,6 +55,10 @@ curl -sS -X POST "$BASE_URL/api/control/v1/decisions" \
 | `PRICING_NOT_FOUND` | 서버에 이 provider·model의 가격표가 없다. provider와 model은 정확히 일치해야 한다. | `pricing_plans`의 이름과 유효 기간을 확인한다. |
 | `PRICING_UNAVAILABLE` | 가격표는 있으나 비용을 계산할 수 없다. `rate-unit-tokens`가 0이거나, 통화가 USD가 아니거나, 같은 가격표 버전에 다른 내용의 snapshot이 이미 있거나, 이미 정해진 requestId에 가격이 묶이지 않았다. | `rate-unit-tokens`와 가격표를 확인한다. 상세 사유(`RATE_UNIT_UNCONFIRMED`, `CURRENCY_UNSUPPORTED`, `PRICE_SNAPSHOT_CONFLICT`, `PRICE_NOT_BOUND` 등)는 `reasons[0].message`에 있다. |
 
+### SDK와 함께 확인 (Enforce)
+
+`scripts/e2e/enforce-pilot.sh up`이 일회용 MySQL로 이 서버를 Enforce 설정으로 띄우고 가짜 프로젝트·키·가격·정책을 넣는다. 이어서 token-pilot-client의 `RealServerEnforceE2ETest`가 허용·정산(COMMIT/RELEASE/RECONCILIATION_REQUIRED), 예산 거부, 같은 판정 재시도, 미정산 예약 한도, Advisory 비차단, 서버 불가를 실제 HTTP로 확인한다. 끝나면 `scripts/e2e/enforce-pilot.sh down`.
+
 ## 4. 고객 안내 순서
 
 1. 판정 API를 켜고 3단계 확인을 마친다.
@@ -69,11 +74,14 @@ curl -sS -X POST "$BASE_URL/api/control/v1/decisions" \
 - [ ] 쓰는 모든 provider·model에 가격표가 있다. 없으면 `PRICING_NOT_FOUND`로 같은 결과가 된다.
 - [ ] `ENFORCE`를 `ADVISORY`/`OBSERVE`로 되돌리는 설정 롤백을 고객이 알고 있다. ADR 0001은 재배포 없이 설정만으로 되돌릴 수 있어야 한다고 정했다. SDK가 실제로 그런지는 이 저장소에서 확인하지 못했다.
 - [ ] 고객이 `on-indeterminate`/`on-unavailable`을 직접 골랐다. 기본은 둘 다 fail-open이다.
+- [ ] `token-pilot.decision.enforce.enabled`와 `token-pilot.reservation.expiry.enabled`가 둘 다 켜져 있다. 판정 API만 켜져 있으면 `ENFORCE`도 Advisory로만 판정되어 예약이 없다.
 
 ## 5. 알아 둘 동작
 
 - **`maxTokens`를 주지 않으면** SDK가 `maxOutputTokens`를 **1024**로 보낸다. 이때 서버가 계산한 최대 예상 비용은 실제 호출의 상한이 아니다. 고객에게 `maxTokens` 설정을 권한다.
-- **`ENFORCE` 요청도 Advisory로만 판정**한다. 예약(`reservation`)은 #17 전까지 발급하지 않고 `effectiveMode`는 `ADVISORY`다.
+- **Enforce 예약을 켜면** `ENFORCE` + `ALLOW`(최대 예상 비용 > 0)가 그 금액을 프로젝트·환경 카운터에 잡는다. 한도는 정책 월 hard 한도에서 원장 확정 지출을 뺀 잔액이고, 카운터의 미정산 예약 + 예약 경로 정산 비용이 그 안에 들어가야 한다. 넘으면 `DENY_BUDGET`(`RESERVED_BUDGET_EXCEEDED`).
+- **같은 호출이 Observe 원장에도 들어오면 이중으로 센다.** 예약 경로로 정산된 비용과 같은 호출의 Observe 사용량이 둘 다 한도에 들어가 실제보다 일찍 거부한다(초과 승인 방향은 아님). 파일럿 go/no-go의 "이중 누적" 기준으로 본다.
+- **같은 `requestId`를 다른 `Idempotency-Key`로 동시에 보내면** 늦은 쪽은 `409`지만 그 키로 잡힌 예약이 남는다. 만료 회수가 닫는다. SDK는 `dec:<requestId>`만 쓰므로 정상 경로에서는 생기지 않는다.
 - **soft 한도 경고**(`*_SOFT_LIMIT_EXCEEDED`)는 `ALLOW`와 함께 `reasons`로 나간다. SDK의 Spring AI advisor는 아직 `reasons`를 앱에 넘기지 않으므로 서버 기록(`decision_records`)에서만 볼 수 있다.
 - **v1 수집(`/api/ingestion/events`)만 쓰는 고객은 월 지출이 실제보다 적게 잡힌다.** 판정은 Observe 원장의 확정 지출(v2 수집)만 쓰므로 남은 예산이 크게 나오고 월 한도 거부 권고가 늦게 나온다.
 - **같은 프로젝트의 판정은 정책 snapshot을 묶는 구간에서 하나씩 처리된다**(프로젝트 행 잠금). 파일럿 규모를 가정했고 처리량은 측정하지 않았다. 지연이 늘면 먼저 이 구간을 본다.

@@ -96,6 +96,10 @@ jwt:
 #                                   # snapshots of the same plan version (events become UNPRICED) until the plan version is bumped
 #   decision:
 #     enabled: false              # true registers POST /api/control/v1/decisions (otherwise 404); needs observe.ingestion.rate-unit-tokens > 0 to price
+#     enforce:
+#       enabled: false            # true: ENFORCE + ALLOW decisions hold budget and return a reservation (effectiveMode ENFORCE);
+#                                 # false: ENFORCE requests are judged as ADVISORY. Turn on reservation.expiry.enabled first
+#       reservation-ttl: PT5M     # reservations not settled by then are closed by the expiry sweep
 #   shadow:
 #     enabled: false              # true registers shadow management and POST /api/control/v1/execution-events; requires V9
 #   reservation:

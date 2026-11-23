@@ -10,7 +10,7 @@ ENFORCE + ALLOW 판정이 잡아두는 예산 예약과 그 정산을 MySQL에 �
 | 3b | 회수 주기 실행(`ReservationExpiryJob`)과 재시작 복구 | 이 PR |
 | 3c | 운영 API: 예약 조회, 운영자 수동 정산(COMMIT·WRITE_OFF) | 이 PR |
 | 4 | 실제 MySQL 통합 테스트(`ReservationMySqlIntegrationTest`), 운영 런북 | 이 PR |
-| - | 판정 API(#15)에서 `PolicyContextService.capture` 다음에 `ReservationService.reserve` 호출 | #15 |
+| - | 판정 API에서 `PolicyContextService.capture`·평가 다음에 `ReservationService.reserve` 호출 (`token-pilot.decision.enforce.enabled`) | #18 |
 
 ## 계약(control-plane-v1.yaml, #32)과 맞춘 부분
 
@@ -115,7 +115,7 @@ ADR 0001 §6을 그대로 따른다(`ReservationState`). 정산 종류(`Settleme
 
 ## 정해야 할 것
 
-- **한도에 무엇을 넣을지**: 카운터는 예약 경로의 금액만 안다. 예약 없이 들어온 사용량(Observe 원장)을 한도에서 뺄지는 #15가 `projectBudgetLimitUsd`·`environmentBudgetLimitUsd`를 계산할 때 정한다(예: 월 예산 − 원장 누적).
+- **한도에 무엇을 넣을지** (#18에서 정함): 판정이 범위별 `월 hard 한도 − 원장 확정 지출`(평가의 잔액)을 `projectBudgetLimitUsd`·`environmentBudgetLimitUsd`로 넘긴다. 카운터는 그 안에서 미정산 예약 + 예약 경로 정산 비용을 막는다. 같은 호출이 Observe 원장에도 들어오면 이중으로 세어 일찍 거부한다(보수적). 정책이 비활성인 범위는 `null`(제한 없음).
 - **IN_FLIGHT 신호**: 계약에 RESERVED → IN_FLIGHT를 알리는 API가 없다. 지금은 정산이 오면 거친 것으로 본다. 만료 회수(3단계)에서 RESERVED 만료를 RELEASED(ADR)로 둘지, 호출 여부를 모르니 RECONCILIATION_REQUIRED로 둘지 결정이 필요하다.
 
 ## 완료 기준 대응
@@ -133,6 +133,6 @@ ADR 0001 §6을 그대로 따른다(`ReservationState`). 정산 종류(`Settleme
 
 ## 남은 것 (다른 이슈 또는 팀 결정)
 
-- 판정 API(#15)에서 `ReservationService.reserve` 호출 연결.
+- 같은 호출의 예약 정산 비용과 Observe 원장 사용량을 한 번만 세는 규칙 (지금은 둘 다 한도에 들어간다).
 - 수동 정산 감사 정보를 DB 컬럼으로 남길지 (지금은 감사 로그).
 - OPERATOR 역할에도 수동 정산을 허용할지 (지금은 OWNER·ADMIN).
